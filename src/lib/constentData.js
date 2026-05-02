@@ -11,7 +11,7 @@ export const TrsutData={
     email:"",
     website:"",
     regNo:"Guj/7039/BK",
-    logo:"/Images/logovjss.jpeg",
+    logo:logo,
     RightLogo:null,
     headerImg:"/Images/headerImg.png",
     topTitle:[

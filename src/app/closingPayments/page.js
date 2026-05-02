@@ -636,7 +636,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
         ],
         { field: 'closingAt', direction: 'desc' }
       );
-      console.log(data[0])
       setMarriages(data);
       setFilteredMarriages(data);
     } catch (e) { message.error('Failed to fetch closings'); }

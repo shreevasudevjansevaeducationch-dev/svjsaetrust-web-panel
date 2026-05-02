@@ -49,6 +49,7 @@ const AddProgramEdit = ({ program, mode = 'add', onSuccess, triggerButton = null
       form.setFieldsValue({
         name: program.name,
         hiname: program.hiname,
+        guname: program.guname || "",
         noteLine: program.noteLine || '',
         about: program.about,
         memberCount:program?.memberCount ||  0,
@@ -101,6 +102,7 @@ const AddProgramEdit = ({ program, mode = 'add', onSuccess, triggerButton = null
         await addDoc(programsRef, {
           name: values.name,
           hiname: values.hiname,
+          guname: values.guname || "",
           noteLine: values.noteLine || '',
           about: values.about,
           ...categoryFlags,
@@ -120,6 +122,7 @@ const AddProgramEdit = ({ program, mode = 'add', onSuccess, triggerButton = null
         await updateDoc(programRef, {
           name: values.name,
           hiname: values.hiname,
+          guname: values.guname || "",
           noteLine: values.noteLine || '',
           about: values.about,
           ...categoryFlags,
@@ -139,6 +142,7 @@ const AddProgramEdit = ({ program, mode = 'add', onSuccess, triggerButton = null
             memberCount:values?.memberCount,
                  name: values.name,
           hiname: values.hiname,
+          guname:values.guname,
           noteLine: values.noteLine || '',
           about: values.about,
           ...categoryFlags,
@@ -397,6 +401,16 @@ const AddProgramEdit = ({ program, mode = 'add', onSuccess, triggerButton = null
                 >
                   <Input 
                     placeholder="Enter hindi yojna name" 
+                    className="h-10"
+                  />
+                </Form.Item>
+                 <Form.Item
+                  label="Gujrati Yojna Name"
+                  name="guname"
+                  rules={[{ required: true, message: 'Please enter yojna name' }]}
+                >
+                  <Input 
+                    placeholder="Enter Gujrati yojna name" 
                     className="h-10"
                   />
                 </Form.Item>

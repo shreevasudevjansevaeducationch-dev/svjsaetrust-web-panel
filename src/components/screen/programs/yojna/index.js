@@ -19,6 +19,7 @@ import {
 import { useSelector, useDispatch } from 'react-redux';
 import AddProgramEdit from '@/components/common/program/AddProgramEdit';
 import { deleteProgram, updateProgram } from '@/lib/services/firebaseService';
+import AddProgram from '@/components/common/program';
 
 const { Panel } = Collapse;
 const { Meta } = Card;
@@ -315,27 +316,11 @@ const Programs = () => {
               <p className="text-gray-600">Manage and view all program configurations</p>
             </div>
             <div className="flex items-center gap-3">
-              <Input.Search
-                placeholder="Search programs, locations..."
-                allowClear
-                enterButton={<SearchOutlined />}
-                size="large"
-                value={searchText}
-                onChange={(e) => handleSearch(e.target.value)}
-                onSearch={handleSearch}
-                style={{ width: 350 }}
-                className="shadow-sm"
-              />
+             <AddProgram/>
               <AddProgramEdit />
             </div>
           </div>
-          {searchText && (
-            <div className="mt-4">
-              <Tag color="blue" closable onClose={() => handleSearch('')}>
-                Search: {searchText} ({filteredData.length} results)
-              </Tag>
-            </div>
-          )}
+
         </div>
 
         {/* Programs Grid */}

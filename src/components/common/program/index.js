@@ -62,6 +62,7 @@ const AddProgram = () => {
       await addDoc(programsRef, {
         name: values.name,
         hiname: values.hiname,
+        guname:values.guname,
         about: values.about,
         ...categoryFlags,
         ageGroups: ageGroupsWithId,
@@ -286,6 +287,17 @@ const AddProgram = () => {
                     className="h-10"
                   />
                 </Form.Item>
+                
+                 <Form.Item
+                  label="Gujrati Yojna Name"
+                  name="guname"
+                  rules={[{ required: true, message: 'Please enter yojna name' }]}
+                >
+                  <Input 
+                    placeholder="Enter Gujrati yojna name" 
+                    className="h-10"
+                  />
+                </Form.Item>
      <Form.Item
                   label="Certificate Note (Hindi)"
                   name="noteLine"
@@ -296,6 +308,7 @@ const AddProgram = () => {
                     className="h-10"
                   />
                 </Form.Item>
+                
                 <Form.Item
                   label="About Program"
                   name="about"

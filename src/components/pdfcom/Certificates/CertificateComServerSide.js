@@ -22,6 +22,7 @@ import RobotoRegular from '@/app/api/helperfile/static/font/Roboto-Regular';
 import RobotoMedium from '@/app/api/helperfile/static/font/Roboto-Medium';
 import RobotoItalic from '@/app/api/helperfile/static/font/Roboto-Italic';
 import RobotoBold from '@/app/api/helperfile/static/font/Roboto-Bold';
+import certificateImg from '@/app/api/helperfile/Images/CertificateImg';
 
 
 // Register Devanagari Font
@@ -386,7 +387,7 @@ const CertificateServerSide = ({data,selectedProgram,fontPath}) => (
   <Document>
     <Page size={{ width: '210mm', height: '148mm' }} style={styles.page}>
       <View style={styles.outerBorder}>
-      <Image src={"/Images/CertificateImg.png"} style={styles.backgroundImage} /> 
+      <Image src={certificateImg} style={styles.backgroundImage} /> 
         {/* <Text style={styles.serialNumber}>{data?.registrationNumber}</Text> */}
         <View style={styles.innerBorder}>
           {/* Top Text */}
