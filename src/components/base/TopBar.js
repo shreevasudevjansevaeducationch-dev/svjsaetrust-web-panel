@@ -7,308 +7,322 @@ import { usePathname, useRouter } from 'next/navigation';
 import { 
   FiMenu, 
   FiX, 
-  FiBell, 
-  FiSearch, 
   FiUser, 
-  FiSettings, 
   FiLogOut, 
   FiChevronRight,
-  FiHelpCircle,
-  FiMail
+  FiChevronDown,
+  FiGrid,
+  FiSearch
 } from 'react-icons/fi';
 import RequestSection from '../common/requestSection';
 import AddProgram from '../common/program';
 import { useAuth } from '@/lib/AuthProvider';
-import { doc, onSnapshot,deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import AddAgent from '../screen/agents/AddAgents';
 import { useDispatch, useSelector } from 'react-redux';
 import { setSelectedProgram } from '@/redux/slices/commonSlice';
 import AddMember from '../screen/programs/members/AddMember';
 import AddPaymentModal from '../common/addPayment/AddPaymentModal';
+
 const { Option } = Select;
 
-const TopBar = ({ 
-  sidebarCollapsed, 
-  toggleSidebar, 
-  showNotifications, 
-  toggleNotifications,
-  showUserMenu, 
-  toggleUserMenu 
-}) => {
+// Page name map
+const PAGE_LABELS = {
+  '': 'Dashboard',
+  'members': 'Members',
+  'agents': 'Agents',
+  'yojna': 'Yojna',
+  'closingPayments': 'Closing Payments',
+  'transactions': 'Payments',
+  'setting': 'Settings',
+};
+
+const TopBar = ({ sidebarCollapsed, toggleSidebar, showNotifications, toggleNotifications, showUserMenu, toggleUserMenu }) => {
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [searchFocused, setSearchFocused] = useState(false);
   const router = useRouter();
   const dispatch = useDispatch();
-  const {user}=useAuth()
+  const { user } = useAuth();
+  const pathname = usePathname();
   const programList = useSelector((state) => state.data.programList);
   const selectedProgram = useSelector((state) => state.data.selectedProgram);
-  // Add logout handler
-  const logout=async()=>{
+
+  const segments = pathname.split('/').filter(Boolean);
+  const currentSegment = segments[segments.length - 1] || '';
+  const pageLabel = PAGE_LABELS[currentSegment] ?? (currentSegment.charAt(0).toUpperCase() + currentSegment.slice(1));
+
+  const logout = async () => {
     await signOut(auth);
     router.replace('/auth/login');
-  }
+  };
+
   const handleLogout = async () => {
     try {
-      // Remove session from Firestore before logout
       const userId = user?.uid;
       const sessionToken = localStorage.getItem("session_token");
       if (userId && sessionToken) {
         await deleteDoc(doc(db, "users", userId, "sessions", sessionToken));
       }
-      logout()
+      logout();
     } catch (error) {
       console.error('Logout failed:', error);
     }
   };
-   const handleProgramSelect = (programId) => {
-    dispatch(setSelectedProgram(programList.find(program => program.id === programId)));
+
+  const handleProgramSelect = (programId) => {
+    dispatch(setSelectedProgram(programList.find(p => p.id === programId)));
   };
-  const notificationItems = [
-    { 
-      id: 1, 
-      title: 'New trust document uploaded', 
-      description: 'Smith Family Trust document requires your review',
-      time: '10 minutes ago',
-      unread: true
-    },
-    { 
-      id: 2, 
-      title: 'Meeting scheduled', 
-      description: 'Trust advisory meeting tomorrow at 10 AM',
-      time: '1 hour ago',
-      unread: true
-    },
-    { 
-      id: 3, 
-      title: 'Trust update requires approval', 
-      description: 'Johnson Trust amendment is pending your approval',
-      time: '3 hours ago',
-      unread: false
-    }
-  ];
-
-  const unreadCount = notificationItems.filter(item => item.unread).length;
-
-  const NotificationContent = () => (
-    <div className="w-96 max-h-[450px] overflow-y-auto notification-content">
-      <div className="px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-        <h3 className="font-semibold text-gray-800">Notifications</h3>
-        <button className="text-xs text-primary-blue hover:text-primary-dark transition-colors font-medium">
-          Mark all as read
-        </button>
-      </div>
-      
-      {notificationItems.length > 0 ? (
-        <div className="divide-y divide-gray-100">
-          {notificationItems.map(item => (
-            <div 
-              key={item.id} 
-              className={`p-4 hover:bg-blue-50 transition-colors cursor-pointer flex ${item.unread ? 'bg-blue-50/30' : ''}`}
-            >
-              <div className="mr-3 mt-1">
-                <div className={`w-2 h-2 rounded-full ${item.unread ? 'bg-primary-blue' : 'bg-gray-200'}`}></div>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-800">{item.title}</p>
-                <p className="text-xs text-gray-600 mt-1">{item.description}</p>
-                <span className="text-xs text-gray-400 mt-2 block">{item.time}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="p-8 text-center">
-          <div className="text-gray-400 mb-2">
-            <FiBell size={24} className="mx-auto opacity-50" />
-          </div>
-          <p className="text-gray-500">No new notifications</p>
-        </div>
-      )}
-      
-      <div className="px-4 py-3 border-t border-gray-200">
-        <button className="w-full text-center text-primary-blue hover:text-primary-dark text-sm font-medium">
-          View all notifications
-        </button>
-      </div>
-    </div>
-  );
-
-  const UserMenu = () => (
-    <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-lg shadow-lg py-2 border border-gray-200 user-menu-content z-10">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <p className="font-medium text-gray-800">{user?.username|| "User"}</p>
-        <p className="text-xs text-gray-500">{user?.email || "Email"}</p>
-      </div>
-      
-     {/* <div className="py-2">
-        <button className="w-full px-4 py-2.5 text-left hover:bg-blue-50 transition-colors flex items-center gap-3">
-          <FiUser size={16} className="text-gray-500" />
-          <span className="text-sm text-gray-700">My Profile</span>
-        </button>
-        <button className="w-full px-4 py-2.5 text-left hover:bg-blue-50 transition-colors flex items-center gap-3">
-          <FiSettings size={16} className="text-gray-500" />
-          <span className="text-sm text-gray-700">Account Settings</span>
-        </button>
-        <button className="w-full px-4 py-2.5 text-left hover:bg-blue-50 transition-colors flex items-center gap-3">
-          <FiHelpCircle size={16} className="text-gray-500" />
-          <span className="text-sm text-gray-700">Help & Support</span>
-        </button>
-      </div>
-     */}
-      <div className="h-px bg-gray-200 my-1" />
-      
-      <button 
-        onClick={() => setIsLogoutModalOpen(true)}
-        className="w-full px-4 py-2.5 text-left hover:bg-red-50 transition-colors flex items-center gap-3"
-      >
-        <FiLogOut size={16} className="text-error" />
-        <span className="text-sm text-error">Logout</span>
-      </button>
-    </div>
-  );
-
 
   useEffect(() => {
     const userId = user?.uid;
     const sessionToken = localStorage.getItem("session_token");
+    if (!userId || !sessionToken) return;
     const sessionRef = doc(db, "users", userId, "sessions", sessionToken);
-    const unsubscribe = onSnapshot(sessionRef, (doc) => {
-      if (!doc.exists()) {
-        logout()
-      }
+    const unsubscribe = onSnapshot(sessionRef, (snap) => {
+      if (!snap.exists()) logout();
     });
-  
     return unsubscribe;
   }, []);
-const getNamepage =()=>{
-    const path = usePathname();
-    console.log(path,"path")
-    const segments = path.split('/');
-    const pageName = segments[segments.length - 1];
-    return pageName.charAt(0).toUpperCase() + pageName.slice(1);
-}
+
+  const initials = user?.username ? user.username.charAt(0).toUpperCase() : 'U';
+
   return (
     <>
-      <header className="bg-white h-16 px-6 flex items-center justify-between border-b border-gray-200 shadow-sm">
-        <div className="flex items-center gap-4">
-          <Tooltip title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"} placement="right">
-            <button 
-              onClick={toggleSidebar}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 hover:text-primary-blue"
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {sidebarCollapsed ? 
-                <FiMenu size={22} /> : 
-                <FiX size={22} />
-              }
-            </button>
-          </Tooltip>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+        .topbar-root {
+          font-family: 'Outfit', sans-serif;
+          background: #fff;
+          border-bottom: 1px solid #f1f5f9;
+          box-shadow: 0 1px 0 rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.03);
+        }
+        .toggle-btn {
+          width: 38px; height: 38px;
+          border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          color: #64748b;
+          transition: all 0.18s;
+          border: 1px solid transparent;
+          flex-shrink: 0;
+        }
+        .toggle-btn:hover {
+          background: #f1f5f9;
+          color: #3b82f6;
+          border-color: #e2e8f0;
+        }
+        .breadcrumb-page {
+          font-size: 15px;
+          font-weight: 700;
+          color: #0f172a;
+          letter-spacing: -0.01em;
+        }
+        .breadcrumb-home {
+          font-size: 13px;
+          color: #94a3b8;
+          font-weight: 500;
+        }
 
-          <nav className="hidden sm:flex items-center gap-2 text-sm">
-            <span className="text-gray-400">Home</span>
-            <FiChevronRight size={14} className="text-gray-300" />
-            <span className="text-gray-800 font-medium">{getNamepage()}</span>
+        /* Program select override */
+        .program-select .ant-select-selector {
+          border-radius: 10px !important;
+          border: 1px solid #e2e8f0 !important;
+          background: #f8fafc !important;
+          font-family: 'Outfit', sans-serif !important;
+          font-size: 13px !important;
+          height: 38px !important;
+          display: flex !important;
+          align-items: center !important;
+          transition: all 0.18s !important;
+        }
+        .program-select .ant-select-selector:hover {
+          border-color: #3b82f6 !important;
+          background: #fff !important;
+        }
+        .program-select.ant-select-focused .ant-select-selector {
+          border-color: #3b82f6 !important;
+          box-shadow: 0 0 0 3px rgba(59,130,246,0.12) !important;
+          background: #fff !important;
+        }
+
+        /* Avatar */
+        .user-avatar-btn {
+          display: flex; align-items: center; gap: 8px;
+          padding: 5px 10px 5px 5px;
+          border-radius: 40px;
+          border: 1px solid #e2e8f0;
+          transition: all 0.18s;
+          cursor: pointer;
+        }
+        .user-avatar-btn:hover {
+          background: #f8fafc;
+          border-color: #cbd5e1;
+        }
+        .user-avatar {
+          width: 30px; height: 30px;
+          background: linear-gradient(135deg, #3b82f6, #2563eb);
+          border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          color: #fff;
+          font-weight: 700;
+          font-size: 13px;
+          flex-shrink: 0;
+        }
+        .user-name-text {
+          font-size: 13px;
+          font-weight: 600;
+          color: #0f172a;
+          white-space: nowrap;
+        }
+
+        /* Dropdown menu */
+        .user-dropdown {
+          position: absolute;
+          right: 0; top: calc(100% + 8px);
+          width: 220px;
+          background: #fff;
+          border-radius: 14px;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.1), 0 2px 6px rgba(0,0,0,0.05);
+          overflow: hidden;
+          z-index: 100;
+          animation: dropIn 0.18s ease;
+        }
+        .user-dropdown-header {
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+          border-bottom: 1px solid #f1f5f9;
+        }
+        .logout-btn {
+          display: flex; align-items: center; gap: 10px;
+          width: 100%; padding: 10px 16px;
+          font-size: 13px; font-weight: 600;
+          color: #ef4444;
+          transition: background 0.15s;
+          cursor: pointer;
+          font-family: 'Outfit', sans-serif;
+        }
+        .logout-btn:hover { background: #fef2f2; }
+
+        /* Separator */
+        .topbar-sep {
+          width: 1px; height: 24px;
+          background: #e2e8f0;
+          flex-shrink: 0;
+        }
+
+        @keyframes dropIn {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Mobile: hide username */
+        @media (max-width: 640px) {
+          .user-name-text { display: none; }
+          .user-avatar-btn { padding: 5px; border-radius: 50%; }
+          .topbar-actions-desktop { display: none; }
+          .program-select { width: 140px !important; }
+        }
+      `}</style>
+
+      <header className="topbar-root h-16 px-4 sm:px-6 flex items-center justify-between gap-3">
+        {/* Left */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button onClick={toggleSidebar} className="toggle-btn" aria-label="Toggle sidebar">
+            {sidebarCollapsed ? <FiMenu size={20} /> : <FiX size={20} />}
+          </button>
+
+          {/* Breadcrumb */}
+          <nav className="hidden sm:flex items-center gap-1.5">
+            <FiGrid size={13} className="text-slate-400" />
+            <span className="breadcrumb-home">Home</span>
+            <FiChevronRight size={13} className="text-slate-300" />
+            <span className="breadcrumb-page">{pageLabel}</span>
           </nav>
+
+          {/* Mobile page title */}
+          <span className="sm:hidden breadcrumb-page truncate">{pageLabel}</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* <div className={`relative hidden md:block transition-all duration-200 ${searchFocused ? 'w-72' : 'w-64'}`}>
-            <input
-              type="text"
-              placeholder="Search..."
-              className="w-full h-10 px-4 py-2 pl-10 rounded-lg border border-gray-200 focus:outline-none focus:border-primary-blue focus:ring-2 focus:ring-primary-light focus:ring-opacity-20 transition-all text-sm"
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-            />
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          </div> */}
-           <Select
-                            placeholder="Select Program/Yojana"
-                            size="large"
-                            className="w-[200px]"
-                            onChange={handleProgramSelect}
-                            value={selectedProgram ? selectedProgram.id : undefined}
-                          >
-                            {programList.map(program => (
-                              <Option key={program.id} value={program.id}>
-                                {program.name}
-                              </Option>
-                            ))}
-                          </Select>
-          <div className="h-6 w-px bg-gray-200 mx-1 hidden md:block"></div>
-          <AddPaymentModal/>
-          <AddAgent/>
-          
-          {/* <AddProgram />  */}
-            <AddMember/>
-          <RequestSection />
-          {/* <Tooltip title="Messages">
-            <button className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 hover:text-primary-blue">
-              <FiMail size={20} />
-            </button>
-          </Tooltip>
-          
-          <Popover
-            content={<NotificationContent />}
-            trigger="click"
-            placement="bottomRight"
-            open={showNotifications}
-            onOpenChange={toggleNotifications}
-            overlayClassName="notification-popover"
+        {/* Right */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Program select */}
+          <Select
+            placeholder="Select Program"
+            className="program-select"
+            style={{ width: 180 }}
+            size="middle"
+            onChange={handleProgramSelect}
+            value={selectedProgram ? selectedProgram.id : undefined}
+            suffixIcon={<FiChevronDown size={13} className="text-slate-400" />}
           >
-            <button 
-              className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors text-gray-600 hover:text-primary-blue notification-trigger"
-              aria-label="Notifications"
-            >
-              <FiBell size={20} />
-              {unreadCount > 0 && (
-                <span className="absolute top-0.5 right-0.5 w-5 h-5 bg-error text-white text-xs flex items-center justify-center rounded-full font-medium">
-                  {unreadCount}
-                </span>
-              )}
+            {programList.map(p => (
+              <Option key={p.id} value={p.id}>{p.name}</Option>
+            ))}
+          </Select>
+
+          <span className="topbar-sep topbar-actions-desktop" />
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-1.5 topbar-actions-desktop">
+            <AddPaymentModal />
+            <AddAgent />
+            <AddMember />
+            <RequestSection />
+          </div>
+
+          <span className="topbar-sep" />
+
+          {/* User menu */}
+          <div className="relative user-menu-trigger">
+            <button onClick={toggleUserMenu} className="user-avatar-btn user-menu-trigger">
+              <div className="user-avatar">{initials}</div>
+              <span className="user-name-text">{user?.username || 'User'}</span>
+              <FiChevronDown size={13} className="text-slate-400" />
             </button>
-          </Popover> */}
-  
-          <div className="relative">
-            <button
-              onClick={toggleUserMenu}
-              className="flex items-center gap-2 p-1.5 hover:bg-gray-100 rounded-lg transition-colors user-menu-trigger"
-            >
-              <div className="w-8 h-8 bg-blue-900 rounded-full flex items-center justify-center text-white shadow-sm">
-                <FiUser size={16} />
+
+            {showUserMenu && (
+              <div className="user-dropdown user-menu-content">
+                <div className="user-dropdown-header">
+                  <p className="text-sm font-bold text-slate-800 truncate">{user?.username || 'User'}</p>
+                  <p className="text-xs text-slate-500 truncate mt-0.5">{user?.email || ''}</p>
+                </div>
+                <button onClick={() => setIsLogoutModalOpen(true)} className="logout-btn">
+                  <FiLogOut size={15} />
+                  <span>Logout</span>
+                </button>
               </div>
-              <span className="hidden md:block text-sm font-medium text-gray-700">
-              {user?.username || "User"}
-              </span>
-              <svg 
-                className="w-4 h-4 text-gray-500 hidden md:block" 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showUserMenu && <UserMenu />}
+            )}
           </div>
         </div>
       </header>
-      
+
+      {/* Mobile actions bar */}
+      <div className="sm:hidden flex items-center gap-2 px-4 py-2 border-b border-slate-100 bg-white overflow-x-auto">
+        <AddPaymentModal />
+        <AddAgent />
+        <AddMember />
+        <RequestSection />
+      </div>
+
+      {/* Logout modal */}
       <Modal
-        title={<div className="flex items-center gap-2 text-error"><FiLogOut size={18} /> <span>Confirm Logout</span></div>}
+        title={
+          <div className="flex items-center gap-2" style={{ color: '#ef4444' }}>
+            <FiLogOut size={17} />
+            <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>Confirm Logout</span>
+          </div>
+        }
         open={isLogoutModalOpen}
         onOk={handleLogout}
         onCancel={() => setIsLogoutModalOpen(false)}
         okText="Logout"
         cancelText="Cancel"
         centered
-        maskClosable={true}
-        okButtonProps={{
-          danger: true,
-          className: 'bg-error hover:bg-error/90 text-white border-error'
-        }}
+        maskClosable
+        okButtonProps={{ danger: true }}
       >
-        <p className="py-2">Are you sure you want to logout from the Trust Management System?</p>
+        <p style={{ fontFamily: 'Outfit, sans-serif', color: '#475569', padding: '8px 0' }}>
+          Are you sure you want to logout from the Trust Management System?
+        </p>
       </Modal>
     </>
   );
