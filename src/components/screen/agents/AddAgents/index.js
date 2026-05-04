@@ -397,7 +397,7 @@ The Team
         onClick={showAgentDrawer}
         className="shadow-md hover:shadow-lg transition-all duration-300 !bg-amber-900"
       >
-        Add Agent
+        ADD AGENT
       </Button>
 
       <Drawer
@@ -405,7 +405,7 @@ The Team
           <div className="flex items-center justify-between">
             <span className="text-xl font-semibold flex items-center gap-2">
               <UserAddOutlined className="text-oragne-500" />
-              Add New Agent
+              ADD NEW AGENT
             </span>
           </div>
         }

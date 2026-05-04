@@ -681,11 +681,11 @@ const AddMember = () => {
         size="medium"
         className='!bg-green-700'
       >
-        नया सदस्य जोड़ें
+       ADD MEMBER
       </Button>
 
       <Drawer
-        title={<Title level={4} style={{ margin: 0 }}>नया सदस्य जोड़ें</Title>}
+        title={<Title level={4} style={{ margin: 0 }}>ADD NEW MEMBER</Title>}
         width={800}
         placement="right"
         onClose={() => !loading && setOpen(false)}

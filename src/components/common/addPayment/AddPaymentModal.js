@@ -1145,7 +1145,7 @@ const AddPaymentModal = () => {
                 size="middle"
                 className="bg-gradient-to-r from-green-500 to-blue-500 border-0 shadow-lg hover:shadow-xl transition-all"
             >
-                Add Payment
+                ADD PAYMENT
             </Button>
             
             <Drawer

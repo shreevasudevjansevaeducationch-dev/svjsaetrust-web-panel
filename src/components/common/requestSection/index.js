@@ -533,7 +533,7 @@ const handleRemove = async () => {
           className="flex items-center gap-2 bg-white hover:bg-gray-50 border-gray-300 shadow-sm"
           type="default"
         >
-          <span>Requests</span>
+          <span>REQUESTS</span>
         </Button>
       </Badge>
 
