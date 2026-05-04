@@ -41,7 +41,7 @@ const MemberCertificateCom = ({
                 borderRadius:"4px",
                 fontSize:"16px",
                 cursor:"pointer",
-            }} fileName={fileName} document={<Certificate data={{...memberData,agentPhone:memberAgent?.phone}} selectedProgram={selectedProgram} />} >
+            }} fileName={fileName} document={<CertificateServerSide data={{...memberData,agentPhone:memberAgent?.phone}} selectedProgram={selectedProgram} />} >
                 Download Pdf
             </PDFDownloadLink>
          
