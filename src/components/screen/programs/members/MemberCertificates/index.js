@@ -1,5 +1,6 @@
 import CertificateViewer from '@/components/pdfcom/Certificates';
 import Certificate from '@/components/pdfcom/Certificates/CertificateCom';
+import CertificateServerSide from '@/components/pdfcom/Certificates/CertificateComServerSide';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { Button, Drawer, Space, Typography } from 'antd'
 import React from 'react'
