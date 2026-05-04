@@ -3,7 +3,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import { 
+import {
   ClientSideRowModelModule,
   ModuleRegistry,
   NumberEditorModule,
@@ -14,14 +14,16 @@ import {
   TextFilterModule,
   ValidationModule,
   RowStyleModule,
-  CellStyleModule
+  CellStyleModule,
+  CsvExportModule 
 } from 'ag-grid-community';
 import { PDFDownloadLink, PDFViewer } from '@react-pdf/renderer';
 import AllPaymentPdf from './AllPaymentPdf';
-import { Button, Drawer, Space } from 'antd';
+import { Button, Drawer, Select, Space, Tag } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
-import dayjs from "dayjs"
+import dayjs from 'dayjs';
 import { getData } from '@/lib/services/firebaseService';
+import { useDispatch, useSelector } from 'react-redux';
 
 ModuleRegistry.registerModules([
   NumberEditorModule,
@@ -33,496 +35,358 @@ ModuleRegistry.registerModules([
   ClientSideRowModelModule,
   ValidationModule,
   RowStyleModule,
-  CellStyleModule
+  CellStyleModule,
+  CsvExportModule
 ]);
 
-const AllPaymentStatus = ({agentId, agentInfo}) => {
+const { Option } = Select;
+
+// ─── Status Badge ────────────────────────────────────────────────────────────
+const StatusRenderer = ({ value }) => {
+  if (!value) return null;
+  const map = {
+    paid:    { label: 'Paid',    bg: '#dcfce7', color: '#166534' },
+    pending: { label: 'Pending', bg: '#fef9c3', color: '#854d0e' },
+    both:    { label: 'Both',    bg: '#dbeafe', color: '#1e40af' },
+  };
+  const s = map[value] || {};
+  return (
+    <span style={{
+      padding: '2px 10px',
+      borderRadius: 20,
+      fontSize: 11,
+      fontWeight: 700,
+      letterSpacing: 0.4,
+      background: s.bg,
+      color: s.color,
+      display: 'inline-block'
+    }}>
+      {s.label}
+    </span>
+  );
+};
+
+const CurrencyRenderer = ({ value }) =>
+  value ? `₹${Number(value).toLocaleString('en-IN')}` : '₹0';
+
+// ─── Column Defs ─────────────────────────────────────────────────────────────
+const COL_DEFS = [
+  { headerName: '#',              field: 'index',              width: 60,  pinned: 'left', cellStyle: { fontWeight: 700, color: '#6b7280' } },
+  { headerName: 'Reg. No.',       field: 'registrationNumber', width: 110, pinned: 'left', cellStyle: { fontWeight: 700 } },
+  { headerName: 'Member Name',    field: 'memberName',         minWidth: 170, cellStyle: { fontWeight: 600 } },
+  { headerName: 'Father Name',    field: 'fatherName',         minWidth: 140 },
+  { headerName: 'Phone',          field: 'phone',              width: 130 },
+  { headerName: 'Village',        field: 'village',            minWidth: 120 },
+  { headerName: 'Program',        field: 'programName',        minWidth: 180, cellStyle: { fontWeight: 600, color: '#4f46e5' } },
+  {
+    headerName: 'Pending (₹)',  field: 'totalPending', width: 130,
+    cellRenderer: CurrencyRenderer, type: 'numericColumn',
+    cellStyle: { fontWeight: 700, color: '#dc2626' }
+  },
+  {
+    headerName: 'Paid (₹)',     field: 'totalPaid',    width: 120,
+    cellRenderer: CurrencyRenderer, type: 'numericColumn',
+    cellStyle: { fontWeight: 700, color: '#059669' }
+  },
+  { headerName: 'Status',       field: 'status',       width: 100, cellRenderer: StatusRenderer },
+  { headerName: 'Pending #',    field: 'pendingCount', width: 105, type: 'numericColumn', cellStyle: { background: '#fef3c7', fontWeight: 600 } },
+  { headerName: 'Paid #',       field: 'paidCount',    width: 95,  type: 'numericColumn', cellStyle: { background: '#dcfce7', fontWeight: 600 } },
+];
+
+const DEFAULT_COL = { sortable: true, filter: true, resizable: true, flex: 1, minWidth: 100 };
+
+// ─── Summary Card ─────────────────────────────────────────────────────────────
+const SummaryCard = ({ label, value, color, sub }) => (
+  <div style={{
+    background: '#fff',
+    border: '1px solid #f1f5f9',
+    borderRadius: 12,
+    padding: '14px 18px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    minWidth: 130
+  }}>
+    <p style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>{label}</p>
+    <p style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1.1, margin: 0 }}>{value}</p>
+    {sub && <p style={{ fontSize: 11, color: '#cbd5e1', marginTop: 2 }}>{sub}</p>}
+  </div>
+);
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+const AllPaymentStatus = ({ agentId, agentInfo }) => {
   const { user } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
+  const programList = useSelector((state) => state.data.programList);
+
+  // Multi-select: array of program IDs. Default = first program only.
+  const [selectedProgramIds, setSelectedProgramIds] = useState([]);
+
   const [rowData, setRowData] = useState([]);
-  const [aggregatedData, setAggregatedData] = useState([]); // New state for aggregated data
-  const gridRef = useRef();
+  const [isLoading, setIsLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const gridRef = useRef();
 
-  // Status badge renderer
-  const StatusRenderer = (props) => {
-    if (!props.value) return null;
-    
-    let statusText = '';
-    let bgColor = '';
-    let textColor = '';
-    
-    if (props.value === 'paid') {
-      statusText = 'Paid';
-      bgColor = 'bg-green-100';
-      textColor = 'text-green-800';
-    } else if (props.value === 'pending') {
-      statusText = 'Pending';
-      bgColor = 'bg-yellow-100';
-      textColor = 'text-yellow-800';
-    } else if (props.value === 'both') {
-      statusText = 'Both';
-      bgColor = 'bg-blue-100';
-      textColor = 'text-blue-800';
+  // Set default program once programList loads
+  useEffect(() => {
+    if (programList?.length > 0 && selectedProgramIds.length === 0) {
+      setSelectedProgramIds([programList[0].id]);
     }
-    
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${bgColor} ${textColor}`}>
-        {statusText}
-      </span>
-    );
-  };
+  }, [programList]);
 
-  // Currency formatter
-  const CurrencyRenderer = (props) => {
-    return props.value ? `₹${props.value.toLocaleString('en-IN')}` : '₹0';
-  };
-
-  const COL_DEFS = [
-    {
-      headerName: 'Sr.No',
-      field: 'index',
-      width: 70,
-      pinned: 'left',
-      cellStyle: { fontWeight: '600' }
-    },
-    {
-      headerName: 'Reg. No.',
-      field: 'registrationNumber',
-      width: 120,
-      pinned: 'left',
-    },
-    {
-      headerName: 'Member Name',
-      field: 'memberName',
-      minWidth: 180,
-      cellStyle: { fontWeight: '500' }
-    },
-    {
-      headerName: 'Father Name',
-      field: 'fatherName',
-      minWidth: 150
-    },
-    {
-      headerName: 'Phone',
-      field: 'phone',
-      width: 130
-    },
-    {
-      headerName: 'Village',
-      field: 'village',
-      minWidth: 120
-    },
-    {
-      headerName: 'Program',
-      field: 'programName',
-      minWidth: 200,
-      cellStyle: { fontWeight: '600' }
-    },
-    {
-      headerName: 'Pending Amount',
-      field: 'totalPending',
-      width: 140,
-      cellRenderer: CurrencyRenderer,
-      type: 'numericColumn',
-      cellStyle: { fontWeight: '600', color: '#dc2626' }
-    },
-    {
-      headerName: 'Paid Amount',
-      field: 'totalPaid',
-      width: 130,
-      cellRenderer: CurrencyRenderer,
-      type: 'numericColumn',
-      cellStyle: { fontWeight: '600', color: '#059669' }
-    },
-    {
-      headerName: 'Status',
-      field: 'status',
-      width: 110,
-      cellRenderer: StatusRenderer
-    },
-    {
-      headerName: 'Pending Count',
-      field: 'pendingCount',
-      width: 120,
-      type: 'numericColumn',
-      cellStyle: { backgroundColor: '#fef3c7', fontWeight: '600' }
-    },
-    {
-      headerName: 'Paid Count',
-      field: 'paidCount',
-      width: 110,
-      type: 'numericColumn',
-      cellStyle: { backgroundColor: '#dcfce7', fontWeight: '600' }
+  // Fetch when selection changes
+  useEffect(() => {
+    if (user?.uid && selectedProgramIds.length > 0) {
+      fetchPaymentData(selectedProgramIds);
+    } else {
+      setRowData([]);
     }
-  ];
+  }, [selectedProgramIds, user?.uid]);
 
-  const defaultColDef = {
-    sortable: true,
-    filter: true,
-    resizable: true,
-    flex: 1,
-    minWidth: 100,
-  };
+  // ── Core fetch (only selected programs) ──────────────────────────────────
+  const fetchPaymentData = async (programIds) => {
+    setIsLoading(true);
+    try {
+      const uid = user.uid;
+      const aggregatedMap = {};
 
-const getAllProgramsMemberPaymentSummary = async () => {
-  console.log("Fetching payment data...");
-  const uid = user.uid;
-  setIsLoading(true);
+      // Run all programs in parallel for speed
+      await Promise.all(
+        programIds.map(async (programId) => {
+          const programDoc = programList.find((p) => p.id === programId);
+          if (!programDoc) return;
+          const programData = programDoc;
 
-  try {
-    const programsSnap = await getDocs(
-      collection(db, `users/${uid}/programs`)
-    );
+          const [memberData, paymentsSnap] = await Promise.all([
+            getData(
+              `/users/${uid}/programs/${programId}/members`,
+              [
+                { field: 'agentId',      operator: '==', value: agentId },
+                { field: 'active_flag',  operator: '==', value: true },
+                { field: 'delete_flag',  operator: '==', value: false },
+                { field: 'status',       operator: '==', value: 'accepted' },
+              ],
+              { field: 'createdAt', direction: 'desc' }
+            ),
+            getDocs(collection(db, `users/${uid}/programs/${programId}/payment_pending`)),
+          ]);
 
-    const flattenedRows = [];
-    const aggregatedMap = {}; // For aggregated data
+          // Build a quick lookup: memberId → payments[]
+          const paymentsByMember = {};
+          paymentsSnap.forEach((pDoc) => {
+            const p = pDoc.data();
+            if (!paymentsByMember[p.memberId]) paymentsByMember[p.memberId] = [];
+            paymentsByMember[p.memberId].push({ id: pDoc.id, ...p });
+          });
 
-    for (const programDoc of programsSnap.docs) {
-      const programId = programDoc.id;
-      const programData = programDoc.data();
+          for (const memberDoc of memberData) {
+            const memberId = memberDoc.id;
+            const memberPayments = paymentsByMember[memberId];
+            if (!memberPayments || memberPayments.length === 0) continue;
 
-      const paymentsRef = collection(
-        db,
-        `users/${uid}/programs/${programId}/payment_pending`
-      );
+            // Aggregate per marriage
+            let totalPaid = 0, totalPending = 0, paidCount = 0, pendingCount = 0;
+            memberPayments.forEach((p) => {
+              const amt = Number(p.payAmount || 0);
+              if (p.status === 'paid') { totalPaid += amt; paidCount++; }
+              else { totalPending += amt; pendingCount++; }
+            });
 
-      const memberData = await getData(
-        `/users/${user.uid}/programs/${programId}/members`,
-        [
-          {
-            field: 'agentId',
-            operator: '==',
-            value: agentId
-          },
-          {
-            field: 'active_flag',
-            operator: '==',
-            value: true
-          },
-          {
-            field: 'delete_flag',
-            operator: '==',
-            value: false
-          },
-          {
-            field: 'status',
-            operator: '==',
-            value: 'accepted'
-          }
-        ],
-        {
-          field: 'createdAt',
-          direction: 'desc'
-        }
-      );
-
-      const paymentsSnap = await getDocs(paymentsRef);
-
-      for (const memberDoc of memberData) {
-        const memberId = memberDoc.id;
-        const memberData = memberDoc;
-
-        const marriageMap = {};
-        let memberTotalPaid = 0;
-        let memberTotalPending = 0;
-        let hasAnyPayment = false; // Flag to check if member has any payments
-
-        paymentsSnap.forEach((pDoc) => {
-          const p = pDoc.data();
-          if (p.memberId !== memberId) return;
-
-          hasAnyPayment = true; // Member has at least one payment
-
-          const marriageId = p.closingMemberId;
-          const amount = Number(p.payAmount || 0);
-
-          if (!marriageMap[marriageId]) {
-            marriageMap[marriageId] = {
-              closingMemberId: marriageId,
-              closingRegNo: p.closingRegNo,
-              paidList: [],
-              pendingList: [],
-              totalPaid: 0,
-              totalPending: 0
-            };
-          }
-
-          const paymentItem = {
-            id: pDoc.id,
-            amount,
-            status: p.status,
-            dueDate: p.dueDate
-          };
-
-          if (p.status === "paid") {
-            marriageMap[marriageId].paidList.push(paymentItem);
-            marriageMap[marriageId].totalPaid += amount;
-            memberTotalPaid += amount;
-          } else {
-            marriageMap[marriageId].pendingList.push(paymentItem);
-            marriageMap[marriageId].totalPending += amount;
-            memberTotalPending += amount;
-          }
-        });
-
-        // SKIP MEMBER IF NO PAYMENTS FOUND
-        if (!hasAnyPayment) {
-          console.log(`Skipping member ${memberData.registrationNumber} - No payment transactions found`);
-          continue; // Skip to next member
-        }
-
-        // Flatten the data structure for AG Grid (detailed view)
-        const marriages = Object.values(marriageMap);
-        
-        // Member with payments - create row for each payment
-        marriages.forEach(marriage => {
-          const allPayments = [...marriage.paidList, ...marriage.pendingList];
-          
-          allPayments.forEach(payment => {
-            flattenedRows.push({
+            const key = `${memberDoc.registrationNumber}-${programId}`;
+            aggregatedMap[key] = {
+              registrationNumber: memberDoc.registrationNumber,
+              memberName:  memberDoc.displayName,
+              fatherName:  memberDoc.fatherName,
+              phone:       memberDoc.phone,
+              village:     memberDoc.village,
               programName: programData.name,
               programId,
               memberId,
-              memberName: memberData.displayName,
-              photoUrl: memberData.photoURL,
-              fatherName: memberData.fatherName,
-              registrationNumber: memberData.registrationNumber,
-              phone: memberData.phone,
-              village: memberData.village,
-              closingMemberName: `Marriage ID: ${marriage.closingMemberId.substring(0, 8)}...`,
-              closingRegNo: marriage.closingRegNo,
-              paymentId: payment.id,
-              amount: payment.amount,
-              status: payment.status,
-              dueDate: payment.dueDate,
-              memberTotalPaid,
-              memberTotalPending
-            });
-          });
-        });
+              totalPaid,
+              totalPending,
+              paidCount,
+              pendingCount,
+              status:
+                paidCount > 0 && pendingCount > 0 ? 'both'
+                : paidCount > 0 ? 'paid'
+                : 'pending',
+            };
+          }
+        })
+      );
 
-        // Create aggregated data for each member-program combination
-        const aggregatedKey = `${memberData.registrationNumber}-${programData.name}`;
-        
-        if (!aggregatedMap[aggregatedKey]) {
-          aggregatedMap[aggregatedKey] = {
-            registrationNumber: memberData.registrationNumber,
-            memberName: memberData.displayName,
-            fatherName: memberData.fatherName,
-            phone: memberData.phone,
-            village: memberData.village,
-            programName: programData.name,
-            programId,
-            memberId,
-            totalPaid: 0,
-            totalPending: 0,
-            paidCount: 0,
-            pendingCount: 0
-          };
-        }
-
-        // Aggregate payments for this member-program
-        marriages.forEach(marriage => {
-          aggregatedMap[aggregatedKey].totalPaid += marriage.totalPaid;
-          aggregatedMap[aggregatedKey].totalPending += marriage.totalPending;
-          aggregatedMap[aggregatedKey].paidCount += marriage.paidList.length;
-          aggregatedMap[aggregatedKey].pendingCount += marriage.pendingList.length;
-        });
-      }
+      const result = Object.values(aggregatedMap).map((r, i) => ({ ...r, index: i + 1 }));
+      setRowData(result);
+    } catch (err) {
+      console.error('Error fetching payment data:', err);
+    } finally {
+      setIsLoading(false);
     }
-
-    // Convert aggregated map to array and add status
-    const aggregatedArray = Object.values(aggregatedMap).map((item, index) => ({
-      ...item,
-      index: index + 1,
-      status: item.paidCount > 0 && item.pendingCount > 0 
-        ? 'both' 
-        : item.paidCount > 0 
-          ? 'paid' 
-          : 'pending'
-    }));
-
-    setRowData(flattenedRows);
-    setAggregatedData(aggregatedArray); // Set aggregated data
-    console.log("✅ Data loaded successfully:", {
-      detailedRows: flattenedRows.length,
-      aggregatedRows: aggregatedArray.length
-    });
-  } catch (error) {
-    console.error("Error fetching data:", error);
-  } finally {
-    setIsLoading(false);
-  }
-};
-
-  useEffect(() => {
-    if (user?.uid) {
-      getAllProgramsMemberPaymentSummary();
-    }
-  }, [user]);
-
-  const onGridReady = useCallback((params) => {
-    // Grid is ready
-  }, []);
-
-  // Export to CSV
-  const onExportCSV = () => {
-    gridRef.current.api.exportDataAsCsv({
-      fileName: 'payment_status_report.csv'
-    });
   };
+
+  // ── Totals ────────────────────────────────────────────────────────────────
+  const totals = rowData.reduce(
+    (acc, r) => ({
+      paid:    acc.paid    + (r.totalPaid    || 0),
+      pending: acc.pending + (r.totalPending || 0),
+      paidCnt: acc.paidCnt + (r.paidCount   || 0),
+      pendCnt: acc.pendCnt + (r.pendingCount || 0),
+    }),
+    { paid: 0, pending: 0, paidCnt: 0, pendCnt: 0 }
+  );
+  const uniqueMembers   = new Set(rowData.map((r) => r.registrationNumber)).size;
+  const uniquePrograms  = new Set(rowData.map((r) => r.programName)).size;
 
   const getFileName = () => {
-    const agentName = agentInfo?.displayName?.replace(/\s+/g, '_') || 'Agent';
-    const date = dayjs().format('DDMMYYYY');
-    return `${agentName}_Payment_Report_all_yojna_${date}.pdf`;
+    const name = agentInfo?.displayName?.replace(/\s+/g, '_') || 'Agent';
+    return `${name}_Payment_${dayjs().format('DDMMYYYY')}.pdf`;
   };
 
-  // Calculate totals for aggregated data
-  const calculateTotals = () => {
-    if (aggregatedData.length === 0) return { totalPaid: 0, totalPending: 0, paidCount: 0, pendingCount: 0 };
-    
-    return {
-      totalPaid: aggregatedData.reduce((sum, r) => sum + (r.totalPaid || 0), 0),
-      totalPending: aggregatedData.reduce((sum, r) => sum + (r.totalPending || 0), 0),
-      paidCount: aggregatedData.reduce((sum, r) => sum + (r.paidCount || 0), 0),
-      pendingCount: aggregatedData.reduce((sum, r) => sum + (r.pendingCount || 0), 0),
-      totalMembers: new Set(aggregatedData.map(r => r.registrationNumber)).size,
-      totalPrograms: new Set(aggregatedData.map(r => r.programName)).size
-    };
-  };
-
-  const totals = calculateTotals();
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4">
-      <div className="mb-4 flex justify-between items-center">
+    <div style={{ padding: '20px 24px', background: '#f8fafc', minHeight: '100vh' }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">All Programs Payment Status (Aggregated)</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            Total Records: {aggregatedData.length} | 
-            Unique Members: {totals.totalMembers} | 
-            Unique Programs: {totals.totalPrograms}
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: -0.5 }}>
+            Payment Status
+          </h2>
+          <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>
+            {agentInfo?.displayName || 'Agent'} · {rowData.length} records across {uniquePrograms} program{uniquePrograms !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex space-x-2">
-          <button
-            onClick={onExportCSV}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+
+        {/* Controls */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {/* Multi-select program picker */}
+          <Select
+            mode="multiple"
+            placeholder="Select Program(s)"
+            style={{ minWidth: 260, maxWidth: 420 }}
+            value={selectedProgramIds}
+            onChange={setSelectedProgramIds}
+            maxTagCount={2}
+            allowClear
+            size="large"
+            dropdownRender={(menu) => (
+              <div>
+                <div
+                  style={{ padding: '6px 12px', cursor: 'pointer', color: '#4f46e5', fontWeight: 600, borderBottom: '1px solid #f1f5f9', fontSize: 13 }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSelectedProgramIds(programList.map((p) => p.id));
+                  }}
+                >
+                  ✓ Select All Programs
+                </div>
+                {menu}
+              </div>
+            )}
           >
-            Export CSV
+            {programList.map((p) => (
+              <Option key={p.id} value={p.id}>{p.name}</Option>
+            ))}
+          </Select>
+
+          <button
+            onClick={() => gridRef.current?.api?.exportDataAsCsv({ fileName: 'payment_status.csv' })}
+            style={{
+              padding: '8px 16px', background: '#10b981', color: '#fff',
+              border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer',
+              fontSize: 13, display: 'flex', alignItems: 'center', gap: 5
+            }}
+          >
+            ⬇ CSV
           </button>
           <button
-            onClick={() => {
-              setOpen(true)
+            onClick={() => setOpen(true)}
+            style={{
+              padding: '8px 16px', background: '#4f46e5', color: '#fff',
+              border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer',
+              fontSize: 13, display: 'flex', alignItems: 'center', gap: 5
             }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
-            Export PDF
+            ⬇ PDF
           </button>
         </div>
       </div>
 
-      <div className="ag-theme-alpine h-[calc(100vh-200px)] rounded-lg shadow-lg">
-        <AgGridReact
-          ref={gridRef}
-          rowData={aggregatedData} // Use aggregated data
-          loading={isLoading}
-          defaultColDef={defaultColDef}
-          columnDefs={COL_DEFS}
-          pagination={true}
-          paginationPageSize={50}
-          paginationPageSizeSelector={[20, 50, 100, 200]}
-          onGridReady={onGridReady}
-          overlayLoadingTemplate={'<span class="ag-overlay-loading-center">Loading payment data...</span>'}
-          overlayNoRowsTemplate={'<span class="ag-overlay-loading-center">No payment records found</span>'}
-          enableCellTextSelection={true}
-          ensureDomOrder={true}
-          rowSelection="multiple"
-          enableClickSelection={true}
-          animateRows={true}
-        />
-      </div>
-
-      {/* Summary Cards */}
-      {!isLoading && aggregatedData.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mt-4">
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Total Paid</p>
-            <p className="text-2xl font-bold text-green-600">
-              ₹{totals.totalPaid.toLocaleString('en-IN')}
-            </p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Total Pending</p>
-            <p className="text-2xl font-bold text-yellow-600">
-              ₹{totals.totalPending.toLocaleString('en-IN')}
-            </p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Paid Payments</p>
-            <p className="text-2xl font-bold text-green-600">
-              {totals.paidCount}
-            </p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Pending Payments</p>
-            <p className="text-2xl font-bold text-yellow-600">
-              {totals.pendingCount}
-            </p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Unique Members</p>
-            <p className="text-2xl font-bold text-blue-600">
-              {totals.totalMembers}
-            </p>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow">
-            <p className="text-sm text-gray-600">Unique Programs</p>
-            <p className="text-2xl font-bold text-purple-600">
-              {totals.totalPrograms}
-            </p>
-          </div>
+      {/* ── Summary Cards ── */}
+      {rowData.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <SummaryCard label="Total Paid"     value={`₹${totals.paid.toLocaleString('en-IN')}`}    color="#059669" />
+          <SummaryCard label="Total Pending"  value={`₹${totals.pending.toLocaleString('en-IN')}`} color="#dc2626" />
+          <SummaryCard label="Paid Payments"  value={totals.paidCnt} color="#059669" sub="transactions" />
+          <SummaryCard label="Pending Count"  value={totals.pendCnt} color="#f59e0b" sub="transactions" />
+          <SummaryCard label="Members"        value={uniqueMembers}  color="#4f46e5" />
+          <SummaryCard label="Programs"       value={uniquePrograms} color="#7c3aed" />
         </div>
       )}
 
+      {/* ── No program selected ── */}
+      {selectedProgramIds.length === 0 && !isLoading && (
+        <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+          <p style={{ fontSize: 16, fontWeight: 600 }}>Select a program to view payment data</p>
+        </div>
+      )}
+
+      {/* ── Grid ── */}
+      {selectedProgramIds.length > 0 && (
+        <div
+          className="ag-theme-alpine"
+          style={{
+            height: 'calc(100vh - 280px)',
+            borderRadius: 12,
+            overflow: 'hidden',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+            border: '1px solid #e2e8f0'
+          }}
+        >
+          <AgGridReact
+            ref={gridRef}
+            rowData={rowData}
+            loading={isLoading}
+            defaultColDef={DEFAULT_COL}
+            columnDefs={COL_DEFS}
+            pagination
+            paginationPageSize={50}
+            paginationPageSizeSelector={[20, 50, 100, 200]}
+            enableCellTextSelection
+            ensureDomOrder
+            animateRows
+            overlayLoadingTemplate='<span style="font-size:14px;color:#6b7280;font-weight:600">Loading payment data…</span>'
+            overlayNoRowsTemplate='<span style="font-size:14px;color:#6b7280">No payment records found for selected program(s)</span>'
+          />
+        </div>
+      )}
+
+      {/* ── PDF Drawer ── */}
       <Drawer
-        title={getFileName()}
-        width={800}
+        title={<span style={{ fontWeight: 700, fontSize: 15 }}>{getFileName()}</span>}
+        width={820}
         placement="right"
         onClose={() => setOpen(false)}
         open={open}
-        maskClosable={false}
-        destroyOnHidden={true}
-        keyboard={false}
+        destroyOnHidden
         footer={
           <Space style={{ float: 'right' }}>
-            <Button onClick={() => setOpen(false)} size="large">
-              Cancel
-            </Button>
+            <Button onClick={() => setOpen(false)} size="large">Cancel</Button>
             <PDFDownloadLink
               document={
                 <AllPaymentPdf
-                  rowData={aggregatedData} // Pass aggregated data to PDF
+                  rowData={rowData}
                   agentInfo={{
                     ...agentInfo,
                     uid: user?.uid,
                     displayName: agentInfo?.displayName || user?.displayName,
-                    phone: agentInfo?.phone || user?.phoneNumber
+                    phone: agentInfo?.phone || user?.phoneNumber,
                   }}
                 />
               }
               fileName={getFileName()}
             >
               {({ loading }) => (
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  size="large"
-                  loading={loading}
-                >
-                  Export PDF
+                <Button type="primary" icon={<DownloadOutlined />} size="large" loading={loading}>
+                  Download PDF
                 </Button>
               )}
             </PDFDownloadLink>
@@ -531,12 +395,12 @@ const getAllProgramsMemberPaymentSummary = async () => {
       >
         <PDFViewer style={{ width: '100%', height: '100vh', border: 'none' }}>
           <AllPaymentPdf
-            rowData={aggregatedData} // Pass aggregated data to PDF
+            rowData={rowData}
             agentInfo={{
               ...agentInfo,
               uid: user?.uid,
               displayName: agentInfo?.displayName || user?.displayName,
-              phone: agentInfo?.phone || user?.phoneNumber
+              phone: agentInfo?.phone || user?.phoneNumber,
             }}
           />
         </PDFViewer>
