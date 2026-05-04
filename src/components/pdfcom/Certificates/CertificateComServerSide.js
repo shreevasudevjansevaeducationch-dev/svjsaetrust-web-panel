@@ -436,7 +436,7 @@ const CertificateServerSide = ({data,selectedProgram,fontPath}) => (
   )} */}
     <View style={styles.schemeBox}>
       <DynamicText style={styles.schemeText}>{
-        selectedProgram?.hiname
+       selectedProgram.guname || selectedProgram?.hiname 
         }</DynamicText>
     </View>
 
