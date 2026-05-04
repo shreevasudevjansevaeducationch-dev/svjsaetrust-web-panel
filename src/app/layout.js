@@ -6,6 +6,7 @@ import CustomDashboardLayout from "@/components/base/Layout";
 import { AuthProvider } from "@/lib/AuthProvider";
 import Providers from "@/components/base/providers";
 import StoreProvider from "../../StoreProvider";
+import { TrsutData } from "@/lib/constentData";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +30,7 @@ const theme = {
 };
 
 export const metadata = {
-  title: "Shavlaji Seva Admin",
+  title: TrsutData.name + " Admin",
   description: "A comprehensive trust management solution",
 };
 

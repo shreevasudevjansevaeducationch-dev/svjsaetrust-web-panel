@@ -195,7 +195,8 @@ const RequestSection = () => {
             password: generateMemberPassword(currentMember.displayName, currentMember.bobDate) || "Member@123", // optional
             programId: currentMember.programId,
             registrationNumber: result.registrationNumber,
-            memberCollectionPath: memberCollectionPath
+            memberCollectionPath: memberCollectionPath,
+              createdBy: user.uid
           });
         
           console.log("Member auth created");
