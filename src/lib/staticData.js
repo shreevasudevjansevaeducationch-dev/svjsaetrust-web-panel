@@ -116,7 +116,10 @@ export const districtsByState =
     { "label_en": "Surendranagar", "label": "सुरेन्द्रनगर", "value": "surendranagar" },
     { "label_en": "Tapi", "label": "तापी", "value": "tapi" },
     { "label_en": "Vadodara", "label": "वडोदरा", "value": "vadodara" },
-    { "label_en": "Valsad", "label": "वलसाड", "value": "valsad" }
+    { "label_en": "Valsad", "label": "वलसाड", "value": "valsad" },
+    { "label_en": "Vav-Tharad", "label": "वाव-थराद", "value": "vav-tharad" },
+{ "label_en": "Suigam", "label": "सुईगाम", "value": "suigam" },
+{ "label_en": "Dhanera", "label": "धानेरा", "value": "dhanera" }
   ],
    "maharashtra": [
     { label_en: "Ahmednagar", label: "अहमदनगर", value: "ahmednagar" },
