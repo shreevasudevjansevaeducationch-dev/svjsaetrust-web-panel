@@ -110,7 +110,7 @@ export async function POST(request) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SINGLE PAYMENT
+// SINGLE PAYMENT — unchanged
 // ═══════════════════════════════════════════════════════════════════════════
 async function processSinglePayment(uid, body) {
   const {
@@ -129,7 +129,6 @@ async function processSinglePayment(uid, body) {
   const [memberSnap, closingMap, pendingSnap, dupCheck] = await Promise.all([
     adminDb.doc(`${basePath}/members/${payerId}`).get(),
     batchGetDocs(basePath, 'members', selectedClosingIds),
-    // Only filter by memberId — JS mein status/delete_flag filter karenge
     adminDb.collection(`${basePath}/payment_pending`)
       .where('memberId', '==', payerId)
       .get(),
@@ -143,10 +142,9 @@ async function processSinglePayment(uid, body) {
 
   const member = { id: memberSnap.id, ...memberSnap.data() };
 
-  // JS mein filter — delete_flag field absent ho tab bhi kaam karega
   const pendingEntries = pendingSnap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((p) => p.delete_flag !== true); // absent = treat as false
+    .filter((p) => p.delete_flag !== true);
 
   const pendingMap = {};
   for (const p of pendingEntries) {
@@ -248,119 +246,158 @@ async function processSinglePayment(uid, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BULK PAYMENT
-// ROOT CAUSE FIX:
-// Firestore mein composite index nahi tha ya delete_flag field absent thi
-// Isliye .where('status','==','pending').where('delete_flag','==',false)
-// = 0 results deta tha
-// FIX: Sirf memberId se query karo, baaki JS mein filter karo
+// BULK PAYMENT — UPDATED: memberClosingSelections support
+//
+// NEW FIELD: memberClosingSelections = { [memberId]: [pendingDocId, ...] }
+// Agar yeh field aaya toh SIRF woh specific pending docs process karo
+// Agar nahi aaya (old behavior) toh sabhi pending closings lo
 // ═══════════════════════════════════════════════════════════════════════════
 async function processBulkPayment(uid, body) {
   const {
     programId, programName,
-    memberIds, globalAmount,
+    memberIds,
+    memberClosingSelections, // ✅ NEW: { memberId: [pendingDocId, ...] }
+    globalAmount,            // optional — old waterfall mode ke liye
     paymentMethod, paymentDate, note,
     onlineReference,
   } = body;
 
-  if (!programId || !memberIds?.length || !globalAmount) {
+  if (!programId || !memberIds?.length) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  }
+
+  // ✅ Determine mode:
+  // - "custom" mode: memberClosingSelections provided — har member ke specific closings
+  // - "waterfall" mode: globalAmount provided — purani waterfall logic
+  const isCustomMode = memberClosingSelections && Object.keys(memberClosingSelections).length > 0;
+
+  if (!isCustomMode && !globalAmount) {
+    return NextResponse.json({ error: 'Either memberClosingSelections or globalAmount required' }, { status: 400 });
   }
 
   const basePath     = `users/${uid}/programs/${programId}`;
   const memberChunks = chunkArray(memberIds, 30);
 
-  // ─── ONE parallel round ───────────────────────────────────────────────────
-  const parallelTasks = [
-    Promise.all(memberIds.map((id) => adminDb.doc(`${basePath}/members/${id}`).get())),
-
-    paymentMethod === 'online' && onlineReference
-      ? isDuplicateRef(uid, programId, onlineReference)
-      : Promise.resolve(false),
-
-    // ✅ KEY FIX: Sirf memberId filter — NO status, NO delete_flag in query
-    // Composite index ki zaroorat nahi, aur absent fields se crash nahi
-    ...memberChunks.map((ch) =>
-      adminDb.collection(`${basePath}/payment_pending`)
-        .where('memberId', 'in', ch)
-        .get()
-    ),
-  ];
-
-  const [memberSnaps, dupCheck, ...pendingSnapChunks] = await Promise.all(parallelTasks);
-
+  // ─── Duplicate ref check ───────────────────────────────────────────────────
+  const dupCheck = paymentMethod === 'online' && onlineReference
+    ? await isDuplicateRef(uid, programId, onlineReference)
+    : false;
   if (dupCheck) return NextResponse.json({ error: 'Duplicate reference number' }, { status: 409 });
 
-  const members = memberSnaps
-    .filter((s) => s.exists)
-    .map((s) => ({ id: s.id, ...s.data() }));
+  // ─── Fetch member docs ─────────────────────────────────────────────────────
+  const memberSnaps = await Promise.all(memberIds.map(id => adminDb.doc(`${basePath}/members/${id}`).get()));
+  const members = memberSnaps.filter(s => s.exists).map(s => ({ id: s.id, ...s.data() }));
+  const memberMap = Object.fromEntries(members.map(m => [m.id, m]));
 
-  // ✅ JS mein filter — delete_flag absent ho toh bhi pending treat karo
-  const allPending = pendingSnapChunks
-    .flatMap((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-    .filter((p) => {
-      const notDeleted = p.delete_flag !== true;     // absent = false = include
-      const isPending  = !p.status || p.status === 'pending'; // absent ya 'pending' = include
-      return notDeleted && isPending;
-    });
+  // ─── Fetch pending closings ────────────────────────────────────────────────
+  const pendingSnapChunks = await Promise.all(
+    memberChunks.map(chunk =>
+      adminDb.collection(`${basePath}/payment_pending`)
+        .where('memberId', 'in', chunk)
+        .get()
+    )
+  );
 
-  console.log(`[bulk] members: ${members.length}, pending after JS filter: ${allPending.length}`);
-  console.log(`[bulk] sample pending:`, allPending.slice(0, 3).map(p => ({
-    id: p.id, memberId: p.memberId, status: p.status, delete_flag: p.delete_flag
-  })));
+  const allPendingDocs = pendingSnapChunks
+    .flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-  // ─── Pre-group by memberId ────────────────────────────────────────────────
+  // ─── Group pending by memberId ─────────────────────────────────────────────
   const pendingByMember = {};
-  for (const p of allPending) {
+  for (const p of allPendingDocs) {
     if (!pendingByMember[p.memberId]) pendingByMember[p.memberId] = [];
     pendingByMember[p.memberId].push(p);
   }
 
-  // ─── Waterfall allocation ─────────────────────────────────────────────────
-  const sortedMembers = [...members].sort((a, b) =>
-    (pendingByMember[b.id]?.length || 0) - (pendingByMember[a.id]?.length || 0)
-  );
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ✅ CUSTOM MODE: har member ke specific selected closing IDs se payment karo
+  // ═══════════════════════════════════════════════════════════════════════════
+  let memberPayments = [];
 
-  let remainingGlobal = Number(globalAmount);
-  const memberPayments = [];
+  if (isCustomMode) {
+    for (const memberId of memberIds) {
+      const member = memberMap[memberId];
+      if (!member) continue;
 
-  for (const member of sortedMembers) {
-    if (remainingGlobal <= 0) break;
+      const selectedPendingIds = memberClosingSelections[memberId] || [];
+      if (!selectedPendingIds.length) continue; // Is member ke liye koi closing select nahi
 
-    const payAmount  = Number(member.payAmount) > 0 ? Number(member.payAmount) : 200;
-    const memberPend = pendingByMember[member.id] || [];
+      const payAmount = Number(member.payAmount) > 0 ? Number(member.payAmount) : 200;
 
-    if (!memberPend.length) continue;
+      // Sirf woh pending docs lo jo user ne select kiye
+      const allMemberPending = pendingByMember[memberId] || [];
+      const selectedClosings = allMemberPending.filter(p =>
+        selectedPendingIds.includes(p.id) &&
+        p.delete_flag !== true &&
+        (!p.status || p.status === 'pending')
+      );
 
-    const maxCanPay     = Math.min(remainingGlobal, memberPend.length * payAmount);
-    const closingsToPay = Math.floor(maxCanPay / payAmount);
-    const actualAmount  = closingsToPay * payAmount;
+      if (!selectedClosings.length) {
+        console.log(`[bulk-custom] ${member.displayName}: No valid pending closings found for selected IDs`);
+        continue;
+      }
 
-    console.log(`[bulk] ${member.displayName}: payAmount=${payAmount}, pending=${memberPend.length}, paying=${actualAmount}`);
+      const amountToPay = selectedClosings.length * payAmount;
 
-    if (actualAmount > 0) {
+      console.log(`[bulk-custom] ${member.displayName}: ${selectedClosings.length} closings, amount=${amountToPay}`);
+
       memberPayments.push({
         member,
-        closings:    memberPend.slice(0, closingsToPay),
-        amountToPay: actualAmount,
+        closings: selectedClosings,
+        amountToPay,
+        payAmount,
       });
-      remainingGlobal -= actualAmount;
+    }
+
+  } else {
+    // ═══════════════════════════════════════════════════════════════════════
+    // WATERFALL MODE (old behavior): globalAmount ko sab members mein distribute
+    // ═══════════════════════════════════════════════════════════════════════
+    const allPending = allPendingDocs.filter(p => {
+      const notDeleted = p.delete_flag !== true;
+      const isPending  = !p.status || p.status === 'pending';
+      return notDeleted && isPending;
+    });
+
+    const sortedMembers = [...members].sort((a, b) =>
+      (pendingByMember[b.id]?.length || 0) - (pendingByMember[a.id]?.length || 0)
+    );
+
+    let remainingGlobal = Number(globalAmount);
+
+    for (const member of sortedMembers) {
+      if (remainingGlobal <= 0) break;
+
+      const payAmount  = Number(member.payAmount) > 0 ? Number(member.payAmount) : 200;
+      const memberPend = (pendingByMember[member.id] || []).filter(
+        p => p.delete_flag !== true && (!p.status || p.status === 'pending')
+      );
+
+      if (!memberPend.length) continue;
+
+      const maxCanPay     = Math.min(remainingGlobal, memberPend.length * payAmount);
+      const closingsToPay = Math.floor(maxCanPay / payAmount);
+      const actualAmount  = closingsToPay * payAmount;
+
+      if (actualAmount > 0) {
+        memberPayments.push({
+          member,
+          closings:    memberPend.slice(0, closingsToPay),
+          amountToPay: actualAmount,
+          payAmount,
+        });
+        remainingGlobal -= actualAmount;
+      }
     }
   }
 
   if (!memberPayments.length) {
     return NextResponse.json({
-      error: 'No pending closings found for selected members',
+      error: 'No valid pending closings found to process',
       debug: {
-        globalAmount,
-        membersFound:        members.length,
-        pendingEntriesFound: allPending.length,
-        memberDetails: sortedMembers.map(m => ({
-          id:           m.id,
-          name:         m.displayName,
-          payAmount:    m.payAmount,
-          pendingCount: pendingByMember[m.id]?.length || 0,
-        })),
+        mode:          isCustomMode ? 'custom' : 'waterfall',
+        membersFound:  members.length,
+        pendingTotal:  allPendingDocs.length,
+        selections:    isCustomMode ? memberClosingSelections : { globalAmount },
       }
     }, { status: 400 });
   }
@@ -368,12 +405,11 @@ async function processBulkPayment(uid, body) {
   // ─── Batch-fetch closing member details ───────────────────────────────────
   const closingMemberIds = [
     ...new Set(
-      memberPayments.flatMap((mp) =>
-        mp.closings.map((c) => c.closingMemberId || c.marriageId).filter(Boolean)
+      memberPayments.flatMap(mp =>
+        mp.closings.map(c => c.closingMemberId || c.marriageId).filter(Boolean)
       )
     ),
   ];
-
   const closingMemberMap = await batchGetDocs(basePath, 'members', closingMemberIds);
 
   // ─── SmartBatch write ─────────────────────────────────────────────────────
@@ -382,10 +418,10 @@ async function processBulkPayment(uid, body) {
   const sb        = new SmartBatch(adminDb);
   let globalSeq   = 0;
   let totalProc   = 0;
+  let totalPaidAmt = 0;
 
-  for (const { member, closings, amountToPay } of memberPayments) {
-    const payAmount = Number(member.payAmount) > 0 ? Number(member.payAmount) : 200;
-    let remaining   = amountToPay;
+  for (const { member, closings, amountToPay, payAmount } of memberPayments) {
+    let remaining = amountToPay;
 
     for (const closing of closings) {
       if (remaining <= 0) break;
@@ -432,6 +468,7 @@ async function processBulkPayment(uid, body) {
         transactionNumber:                txNum,
         batchId:                          `BATCH-${batchId}`,
         sequenceNumber:                   globalSeq,
+        bulkPaymentMode:                  isCustomMode ? 'custom_selection' : 'waterfall', // ✅ audit trail
         search_keywords:                  createSearchIndex([
           member.displayName, member.registrationNumber,
           cm.displayName, cm.registrationNumber,
@@ -451,19 +488,25 @@ async function processBulkPayment(uid, body) {
         ...(paymentMethod === 'online' && onlineReference ? { onlineReference } : {}),
       });
 
-      remaining -= pay;
+      remaining    -= pay;
+      totalPaidAmt += pay;
       totalProc++;
     }
   }
 
   await sb.commit();
 
+  const remaining = isCustomMode
+    ? 0 // custom mode mein koi remaining nahi
+    : Number(globalAmount) - totalPaidAmt;
+
   return NextResponse.json({
     success:           true,
+    mode:              isCustomMode ? 'custom_selection' : 'waterfall',
     membersProcessed:  memberPayments.length,
     closingsProcessed: totalProc,
-    totalPaid:         Number(globalAmount) - remainingGlobal,
-    remaining:         remainingGlobal,
+    totalPaid:         totalPaidAmt,
+    remaining,
     batchId:           `BATCH-${batchId}`,
   });
 }

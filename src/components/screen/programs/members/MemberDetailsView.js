@@ -261,9 +261,9 @@ const columns = [
                     <Descriptions.Item label="Name">{selectedMember.displayName}</Descriptions.Item>
                     <Descriptions.Item label="Father Name">{selectedMember.fatherName || '-'}</Descriptions.Item>
                     <Descriptions.Item label="Surname">{selectedMember.jati || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Religion">{selectedMember.religion || '-'}</Descriptions.Item>
                     <Descriptions.Item label="Phone">{selectedMember.phone}</Descriptions.Item>
                     <Descriptions.Item label="Registration Number">{selectedMember.registrationNumber}</Descriptions.Item>
+                    <Descriptions.Item label="Password">{selectedMember.password || '-'}</Descriptions.Item>
                     <Descriptions.Item label="Pay Amount & Join Fees">
                       Pay Amount: {selectedMember.payAmount} - Join Fees: {selectedMember?.joinFees || ''}
                     </Descriptions.Item>

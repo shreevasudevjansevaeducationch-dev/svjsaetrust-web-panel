@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   App, Input, Select, Button, Tag, Tooltip, Modal,
   Drawer, Form, DatePicker, Spin, Avatar, Row, Col,
-  Steps, Alert, InputNumber, Empty, Popconfirm, message as antdMessage, Badge
+  Steps, Alert, InputNumber, Empty, Popconfirm, message as antdMessage, Badge, Checkbox
 } from 'antd';
 import dayjs from 'dayjs';
 import {
@@ -12,7 +12,7 @@ import {
   CreditCardOutlined, WalletOutlined, TeamOutlined, UnorderedListOutlined,
   AppstoreOutlined, ThunderboltOutlined, CalendarOutlined, InfoCircleOutlined,
   SortAscendingOutlined, GlobalOutlined, PercentageOutlined,
-  EyeOutlined, RocketOutlined
+  EyeOutlined, RocketOutlined, EditOutlined, SettingOutlined
 } from '@ant-design/icons';
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -40,14 +40,12 @@ ModuleRegistry.registerModules([
 const fmt = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const pct = (paid, total) => (total > 0 ? Math.round((paid / total) * 100) : 0);
 
-// ─── API HELPER: get Firebase ID token and call server API ───────────────────
+// ─── API HELPER ───────────────────────────────────────────────────────────────
 async function callApi(endpoint, options = {}) {
   const { getAuth } = await import('firebase/auth');
   const auth = getAuth();
   const token = await auth.currentUser?.getIdToken();
-
   if (!token) throw new Error('Not authenticated');
-
   const res = await fetch(endpoint, {
     ...options,
     headers: {
@@ -56,9 +54,7 @@ async function callApi(endpoint, options = {}) {
       ...(options.headers || {}),
     },
   });
-
   const data = await res.json();
-
   if (!res.ok) {
     const err = new Error(data.error || 'API Error');
     err.status = res.status;
@@ -67,12 +63,15 @@ async function callApi(endpoint, options = {}) {
   return data;
 }
 
-// Fetch payment data from server
 async function fetchPaymentDataAPI(programId) {
   return callApi(`/api/payments/fetch?programId=${programId}`);
 }
 
-// Process single payment
+// ✅ NEW: Fetch pending closings for specific members
+async function fetchMemberPendingClosingsAPI(programId, memberIds) {
+  return callApi(`/api/payments/fetch-pending?programId=${programId}&memberIds=${memberIds.join(',')}`);
+}
+
 async function processSinglePaymentAPI(payload) {
   return callApi('/api/payments/process', {
     method: 'POST',
@@ -80,7 +79,6 @@ async function processSinglePaymentAPI(payload) {
   });
 }
 
-// Process bulk payment
 async function processBulkPaymentAPI(payload) {
   return callApi('/api/payments/process', {
     method: 'POST',
@@ -88,7 +86,6 @@ async function processBulkPaymentAPI(payload) {
   });
 }
 
-// Check duplicate reference (uses server)
 async function checkDupRefAPI(programId, onlineReference) {
   try {
     await callApi('/api/payments/process', {
@@ -99,6 +96,131 @@ async function checkDupRefAPI(programId, onlineReference) {
   } catch (err) {
     return err.status === 409;
   }
+}
+
+// ─── CLOSING SELECTOR MODAL ───────────────────────────────────────────────────
+// Member ke sab pending closings dikhata hai, user select kar sakta hai
+function ClosingSelectorModal({ open, onClose, member, pendingClosings, selectedClosingIds, onConfirm }) {
+  const [localSelected, setLocalSelected] = useState([]);
+
+  useEffect(() => {
+    if (open) setLocalSelected(selectedClosingIds || []);
+  }, [open, selectedClosingIds]);
+
+  const toggleClosing = (id) => {
+    setLocalSelected(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectAll = () => setLocalSelected(pendingClosings.map(c => c.id));
+  const clearAll = () => setLocalSelected([]);
+
+  const totalAmount = localSelected.length * (member?.payAmount || 200);
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title={
+        <div className="flex items-center gap-3">
+          <Avatar src={member?.photoURL} size={36}
+            style={{ background: `hsl(${(member?.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontWeight: 700 }}>
+            {member?.displayName?.charAt(0)?.toUpperCase()}
+          </Avatar>
+          <div>
+            <div className="font-bold text-gray-900 text-sm">{member?.displayName}</div>
+            <div className="text-xs text-gray-400">{member?.registrationNumber} · Closing Select करें</div>
+          </div>
+        </div>
+      }
+      footer={
+        <div className="flex items-center justify-between">
+          <div className="text-sm">
+            <span className="text-gray-500">{localSelected.length} selected · </span>
+            <span className="font-bold text-green-600">{fmt(totalAmount)}</span>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={onClose}>Cancel</Button>
+            <Button type="primary" onClick={() => { onConfirm(localSelected); onClose(); }}
+              disabled={localSelected.length === 0}
+              className="bg-indigo-500">
+              Confirm ({localSelected.length})
+            </Button>
+          </div>
+        </div>
+      }
+      width={480}
+    >
+      <div className="space-y-3">
+        {/* Quick actions */}
+        <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+          <span className="text-xs text-gray-500">{pendingClosings.length} pending closings</span>
+          <div className="flex gap-2">
+            <Button size="small" type="link" onClick={selectAll} className="p-0 h-auto text-xs text-indigo-500">
+              Select All
+            </Button>
+            <span className="text-gray-300">|</span>
+            <Button size="small" type="link" onClick={clearAll} className="p-0 h-auto text-xs text-red-400">
+              Clear
+            </Button>
+          </div>
+        </div>
+
+        {/* Quick select buttons: first N */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-400">Quick:</span>
+          {[1, 2, 3, 5, 10].filter(n => n <= pendingClosings.length).map(n => (
+            <Button key={n} size="small" type="default"
+              className="text-xs h-6 px-2 rounded-full border-indigo-200 text-indigo-600"
+              onClick={() => setLocalSelected(pendingClosings.slice(0, n).map(c => c.id))}>
+              First {n}
+            </Button>
+          ))}
+        </div>
+
+        {/* Closing list */}
+        <div className="border border-gray-200 rounded-xl overflow-hidden" style={{ maxHeight: 320, overflowY: 'auto' }}>
+          {pendingClosings.length === 0
+            ? <Empty description="No pending closings" className="py-8" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            : pendingClosings.map((closing, i) => {
+                const isSelected = localSelected.includes(closing.id);
+                const idx = localSelected.indexOf(closing.id);
+                return (
+                  <div key={closing.id}
+                    onClick={() => toggleClosing(closing.id)}
+                    className={`flex items-center gap-3 px-3 py-2.5 border-b last:border-0 cursor-pointer transition-colors
+                      ${isSelected ? 'bg-indigo-50 border-l-2 border-l-indigo-400' : 'bg-white hover:bg-gray-50'}`}>
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
+                      ${isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-gray-300'}`}>
+                      {isSelected && <CheckCircleOutlined className="text-white" style={{ fontSize: 11 }} />}
+                    </div>
+                    <Avatar size={30} src={closing.closingMemberPhoto}
+                      style={{ background: `hsl(${(closing.closingMemberName?.charCodeAt(0) || 0) * 11 % 360},55%,55%)`, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                      {closing.closingMemberName?.charAt(0)?.toUpperCase()}
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-800 truncate">{closing.closingMemberName || closing.closingMemberId}</div>
+                      <div className="text-xs text-gray-400">{closing.closingMemberReg || '—'}</div>
+                      {closing.marriageDate && (
+                        <div className="text-xs text-indigo-400"><CalendarOutlined className="mr-1" />{closing.marriageDate}</div>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-xs font-bold text-gray-600">{fmt(member?.payAmount || 200)}</div>
+                      {isSelected && (
+                        <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center text-white text-xs font-bold mx-auto mt-0.5">
+                          {idx + 1}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 // ─── CLOSING DETAILS DRAWER ───────────────────────────────────────────────────
@@ -219,70 +341,129 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
 }
 
 // ─── BULK PAYMENT DRAWER ──────────────────────────────────────────────────────
+// ✅ NEW: Ab har member ke liye specific closings select kar sakte ho
 function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName, user, onSuccess }) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [loading, setLoading] = useState(false);
-  const [globalAmount, setGlobalAmount] = useState(0);
   const [refValid, setRefValid] = useState(true);
   const [checkingRef, setCheckingRef] = useState(false);
-  const [memberPayments, setMemberPayments] = useState([]);
 
-  // Calculate waterfall distribution preview (client side only for preview)
+  // ✅ NEW STATE: Per-member pending closings aur selected closings
+  const [memberPendingClosings, setMemberPendingClosings] = useState({}); // { memberId: [closing, ...] }
+  const [memberSelectedClosings, setMemberSelectedClosings] = useState({}); // { memberId: [closingId, ...] }
+  const [fetchingClosings, setFetchingClosings] = useState(false);
+  const [selectorModal, setSelectorModal] = useState({ open: false, member: null });
+
+  // ✅ Fetch each member's pending closings when drawer opens
   useEffect(() => {
-    if (open && selectedRows.length && globalAmount > 0) {
-      const distribution = [];
-      let remainingAmount = globalAmount;
+    if (!open || !selectedRows.length || !programId || !user) return;
 
-      const sortedMembers = [...selectedRows].sort((a, b) => {
-        const aHasPending = (a.pendingClosingCount || 0) > 0;
-        const bHasPending = (b.pendingClosingCount || 0) > 0;
-        if (aHasPending && !bHasPending) return -1;
-        if (!aHasPending && bHasPending) return 1;
-        return (a.totalPending || 0) - (b.totalPending || 0);
-      });
+    (async () => {
+      setFetchingClosings(true);
+      try {
+        const memberIds = selectedRows.map(r => r.id);
 
-      for (const member of sortedMembers) {
-        if (remainingAmount <= 0) break;
-        const pendingAmount = member.totalPending || 0;
-        const perClosingAmount = member.payAmount || 200;
-        const pendingClosings = member.pendingClosingCount || Math.ceil(pendingAmount / perClosingAmount);
-        const maxPossibleAmount = Math.min(pendingAmount, remainingAmount);
-        const closingsCanPay = Math.floor(maxPossibleAmount / perClosingAmount);
-        const amountToPay = closingsCanPay * perClosingAmount;
+        // Fetch all pending payment_pending entries for these members
+        // Firestore mein 'in' max 30 items allow karta hai
+        const chunks = [];
+        for (let i = 0; i < memberIds.length; i += 30) chunks.push(memberIds.slice(i, i + 30));
 
-        if (amountToPay > 0) {
-          distribution.push({
-            memberId: member.id,
-            memberName: member.displayName,
-            memberReg: member.registrationNumber,
-            memberPhoto: member.photoURL,
-            pendingAmount,
-            pendingClosings,
-            amountToPay,
-            closingsToPay: closingsCanPay,
-            isFullPayment: amountToPay >= pendingAmount,
-            perClosingAmount,
-          });
-          remainingAmount -= amountToPay;
+        const allEntries = [];
+        for (const chunk of chunks) {
+          const pendRef = collection(db, `users/${user.uid}/programs/${programId}/payment_pending`);
+          const q = query(pendRef, where('memberId', 'in', chunk));
+          const snap = await getDocs(q);
+          allEntries.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
         }
+
+        // JS mein filter: only pending, not deleted
+        const pending = allEntries.filter(p => p.delete_flag !== true && (!p.status || p.status === 'pending'));
+
+        // Enrich with closing member info
+        const closingMemberIds = [...new Set(pending.map(p => p.closingMemberId || p.marriageId).filter(Boolean))];
+
+        // Batch fetch closing member details
+        const closingMemberMap = {};
+        const cmChunks = [];
+        for (let i = 0; i < closingMemberIds.length; i += 10) cmChunks.push(closingMemberIds.slice(i, i + 10));
+        for (const chunk of cmChunks) {
+          await Promise.all(chunk.map(async cmId => {
+            try {
+              const cmRef = doc(db, `users/${user.uid}/programs/${programId}/members`, cmId);
+              const cmSnap = await getDoc(cmRef);
+              if (cmSnap.exists()) closingMemberMap[cmId] = cmSnap.data();
+            } catch {}
+          }));
+        }
+
+        // Group by memberId, enrich with closing member details
+        const grouped = {};
+        for (const entry of pending) {
+          if (!grouped[entry.memberId]) grouped[entry.memberId] = [];
+          const cmId = entry.closingMemberId || entry.marriageId;
+          const cm = closingMemberMap[cmId] || {};
+          grouped[entry.memberId].push({
+            ...entry,
+            closingMemberName: cm.displayName || entry.closingMemberName || cmId || '—',
+            closingMemberReg: cm.registrationNumber || entry.closingMemberRegistrationNumber || '—',
+            closingMemberPhoto: cm.photoURL || '',
+            marriageDate: cm.marriage_date || entry.marriageDate || '',
+          });
+        }
+
+        setMemberPendingClosings(grouped);
+
+        // ✅ Default: sabhi pending closings pre-select karo
+        const defaultSelected = {};
+        for (const [memberId, closings] of Object.entries(grouped)) {
+          defaultSelected[memberId] = closings.map(c => c.id);
+        }
+        setMemberSelectedClosings(defaultSelected);
+      } catch (e) {
+        console.error(e);
+        message.error('Failed to fetch pending closings');
+      } finally {
+        setFetchingClosings(false);
       }
-      setMemberPayments(distribution);
-    } else if (globalAmount === 0) {
-      setMemberPayments([]);
-    }
-  }, [globalAmount, selectedRows, open]);
+    })();
+  }, [open, selectedRows, programId, user]);
 
   useEffect(() => {
     if (!open) {
       form.resetFields();
       setPaymentMethod('cash');
-      setGlobalAmount(0);
       setRefValid(true);
-      setMemberPayments([]);
+      setMemberPendingClosings({});
+      setMemberSelectedClosings({});
     }
   }, [open, form]);
+
+  // ✅ Calculate distribution based on selected closings per member
+  const memberDistribution = useMemo(() => {
+    return selectedRows
+      .map(member => {
+        const payAmount = member.payAmount || 200;
+        const selectedIds = memberSelectedClosings[member.id] || [];
+        const pendingClosings = memberPendingClosings[member.id] || [];
+        const selectedClosings = pendingClosings.filter(c => selectedIds.includes(c.id));
+        const amountToPay = selectedClosings.length * payAmount;
+
+        return {
+          member,
+          payAmount,
+          selectedClosings,
+          selectedCount: selectedClosings.length,
+          totalPendingCount: pendingClosings.length,
+          amountToPay,
+        };
+      })
+      .filter(d => d.selectedCount > 0); // Sirf wo members jinke koi closing selected ho
+  }, [selectedRows, memberSelectedClosings, memberPendingClosings]);
+
+  const grandTotal = memberDistribution.reduce((s, d) => s + d.amountToPay, 0);
+  const totalClosingsSelected = memberDistribution.reduce((s, d) => s + d.selectedCount, 0);
 
   const handleCheckRef = async (ref) => {
     if (!ref || !programId) return;
@@ -300,19 +481,24 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
       message.error('Enter transaction reference');
       return;
     }
-    if (memberPayments.length === 0) {
-      message.error('No valid payments to process');
+    if (memberDistribution.length === 0) {
+      message.error('Koi bhi closing select nahi ki gayi');
       return;
     }
 
     setLoading(true);
     try {
-      // ✅ Server side call - token auto-attached
+      // ✅ NEW: Per-member selected closing IDs bhejo
+      const memberClosingSelections = {};
+      for (const d of memberDistribution) {
+        memberClosingSelections[d.member.id] = d.selectedClosings.map(c => c.id);
+      }
+
       const result = await processBulkPaymentAPI({
         programId,
         programName,
-        memberIds: selectedRows.map((r) => r.id),
-        globalAmount,
+        memberIds: selectedRows.map(r => r.id),
+        memberClosingSelections, // ✅ NEW field
         paymentMethod: values.paymentMethod,
         paymentDate: dayjs(values.paymentDate).toISOString(),
         note: values.note || '',
@@ -320,7 +506,7 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
       });
 
       message.success(
-        `बल्क पेमेंट हो गया! ₹${result.totalPaid?.toLocaleString()} का भुगतान ${result.membersProcessed} सदस्यों में वितरित किया गया.`
+        `Bulk payment complete! ${fmt(result.totalPaid)} ka bhugtan ${result.membersProcessed} sadasyoṃ ke ${result.closingsProcessed} closings mein vitarit kiya gaya.`
       );
       onSuccess?.();
       onClose();
@@ -338,200 +524,251 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
     }
   };
 
-  const totalOwe = selectedRows.reduce((s, r) => s + (r.totalPending || 0), 0);
-  const totalAllocated = memberPayments.reduce((sum, p) => sum + p.amountToPay, 0);
-  const remainingAmount = globalAmount - totalAllocated;
-  const activeMembersCount = memberPayments.length;
-  const fullPaidMembers = memberPayments.filter(p => p.isFullPayment).length;
+  // ✅ Open closing selector for a specific member
+  const openClosingSelector = (member) => {
+    setSelectorModal({ open: true, member });
+  };
+
+  const handleClosingConfirm = (memberId, selectedIds) => {
+    setMemberSelectedClosings(prev => ({ ...prev, [memberId]: selectedIds }));
+  };
+
+  const selectorMember = selectorModal.member;
 
   return (
-    <Drawer
-      open={open} onClose={onClose} width={620} destroyOnClose
-      title={
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md">
-            <ThunderboltOutlined className="text-white text-lg" />
+    <>
+      <Drawer
+        open={open} onClose={onClose} width={640} destroyOnClose
+        title={
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md">
+              <ThunderboltOutlined className="text-white text-lg" />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900 text-base">Bulk Payment</div>
+              <div className="text-xs text-gray-400">{selectedRows.length} members · {programName}</div>
+            </div>
           </div>
+        }
+        footer={
+          <div className="flex gap-3 p-2">
+            <Button onClick={onClose} block size="large">Cancel</Button>
+            <Button
+              type="primary" size="large" loading={loading} block
+              disabled={memberDistribution.length === 0 || !refValid || checkingRef || fetchingClosings}
+              className="bg-gradient-to-r from-amber-500 to-orange-500 border-0 shadow-md"
+              icon={<ThunderboltOutlined />}
+              onClick={() => form.submit()}
+            >
+              Process {memberDistribution.length} Members · {fmt(grandTotal)}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+
+          {/* Summary stats */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Members', value: selectedRows.length, color: '#6366f1', bg: '#eef2ff' },
+              { label: 'Closings Selected', value: totalClosingsSelected, color: '#10b981', bg: '#ecfdf5' },
+              { label: 'Grand Total', value: fmt(grandTotal), color: '#f97316', bg: '#fff7ed' },
+            ].map(s => (
+              <div key={s.label} className="rounded-xl p-3 text-center" style={{ background: s.bg }}>
+                <div className="text-base font-black" style={{ color: s.color }}>{s.value}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ✅ NEW: Per-member closing selection table */}
           <div>
-            <div className="font-bold text-gray-900 text-base">Bulk Payment - Waterfall</div>
-            <div className="text-xs text-gray-400">{selectedRows.length} members selected · {programName}</div>
-          </div>
-        </div>
-      }
-      footer={
-        <div className="flex gap-3 p-2">
-          <Button onClick={onClose} block size="large">Cancel</Button>
-          <Button
-            type="primary" size="large" loading={loading} block
-            disabled={memberPayments.length === 0 || !refValid || checkingRef}
-            className="bg-gradient-to-r from-amber-500 to-orange-500 border-0 shadow-md"
-            icon={<ThunderboltOutlined />}
-            onClick={() => form.submit()}
-          >
-            Process {activeMembersCount} Member{activeMembersCount !== 1 ? 's' : ''}
-          </Button>
-        </div>
-      }
-    >
-      <div className="space-y-5">
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3">
-          <div className="flex items-center gap-2 text-blue-700">
-            <ThunderboltOutlined className="text-lg" />
-            <span className="text-sm font-semibold">Waterfall Distribution</span>
-          </div>
-          <p className="text-xs text-blue-600 mt-1">
-            पहले एक member के सभी pending closings का पूरा भुगतान करें, फिर अगले member का.
-            प्रति closing ₹{selectedRows[0]?.payAmount || 200} का भुगतान होगा.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: 'Total Owed', value: fmt(totalOwe), color: '#6366f1', bg: '#eef2ff' },
-            { label: 'Will Pay', value: fmt(totalAllocated), color: '#10b981', bg: '#ecfdf5' },
-            { label: 'Remaining', value: fmt(remainingAmount > 0 ? remainingAmount : 0), color: remainingAmount > 0 ? '#f97316' : '#ef4444', bg: remainingAmount > 0 ? '#fff7ed' : '#fef2f2' },
-            { label: 'Full Paid', value: fullPaidMembers, color: '#22c55e', bg: '#f0fdf4' },
-          ].map(s => (
-            <div key={s.label} className="rounded-xl p-3 text-center" style={{ background: s.bg }}>
-              <div className="text-base font-black" style={{ color: s.color }}>{s.value}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <SettingOutlined className="text-indigo-500" /> Member-wise Closing Selection
+              </div>
+              <div className="text-xs text-gray-400">Click "Edit" to choose specific closings</div>
             </div>
-          ))}
-        </div>
 
-        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
-          <div className="text-sm font-semibold text-amber-700 mb-3 flex items-center gap-2">
-            <GlobalOutlined /> Enter Payment Amount (Waterfall)
-          </div>
-          <div className="flex gap-2">
-            <InputNumber
-              prefix={<span className="text-amber-600 font-bold">₹</span>}
-              size="large" className="flex-1"
-              placeholder="Enter total amount to distribute"
-              min={0} value={globalAmount} onChange={setGlobalAmount}
-              formatter={v => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-              parser={v => v?.replace(/,/g, '') || '0'}
-            />
-            <Button type="default" size="large" onClick={() => setGlobalAmount(totalOwe)}
-              className="border-amber-400 text-amber-600 font-semibold">Full Payment</Button>
-          </div>
-        </div>
+            {fetchingClosings ? (
+              <div className="flex items-center justify-center py-10 border border-gray-200 rounded-xl bg-gray-50">
+                <Spin />
+                <span className="ml-2 text-sm text-gray-400">Closings fetch ho rahe hain...</span>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                {/* Header */}
+                <div className="bg-gray-50 px-3 py-2 border-b grid grid-cols-12 text-xs font-semibold text-gray-400">
+                  <div className="col-span-4">Member</div>
+                  <div className="col-span-2 text-center">Pending</div>
+                  <div className="col-span-3 text-center">Selected</div>
+                  <div className="col-span-2 text-right">Amount</div>
+                  <div className="col-span-1"></div>
+                </div>
 
-        <div>
-          <div className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-            <PercentageOutlined className="text-indigo-500" /> Waterfall Distribution (Member-wise)
-          </div>
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="bg-gray-50 px-3 py-2 border-b grid grid-cols-12 text-xs font-semibold text-gray-400">
-              <div className="col-span-5">Member</div>
-              <div className="col-span-2 text-right">Pending</div>
-              <div className="col-span-3 text-right">Paying</div>
-              <div className="col-span-2 text-right">Status</div>
-            </div>
-            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-              {memberPayments.length === 0 && globalAmount > 0 ? (
-                <div className="p-8 text-center text-gray-400">
-                  <WarningOutlined className="text-2xl mb-2" />
-                  <p className="text-sm">Amount too low to pay any full closing</p>
-                </div>
-              ) : memberPayments.length === 0 ? (
-                <div className="p-8 text-center text-gray-400">
-                  <p className="text-sm">Enter amount to see distribution</p>
-                </div>
-              ) : (
-                memberPayments.map((payment, i) => {
-                  const isFull = payment.isFullPayment;
-                  return (
-                    <div key={payment.memberId}
-                      className="grid grid-cols-12 items-center gap-2 px-3 py-3 border-b last:border-0 bg-white">
-                      <div className="col-span-5 flex items-center gap-2 min-w-0">
-                        <div className="text-xs font-bold text-gray-300 w-4 flex-shrink-0">{i + 1}</div>
-                        {payment.memberPhoto
-                          ? <Avatar src={payment.memberPhoto} size={30} className="flex-shrink-0" />
-                          : <Avatar size={30} className="flex-shrink-0"
-                              style={{ background: `hsl(${(i * 47) % 360},60%,55%)`, fontSize: 11, fontWeight: 700 }}>
-                              {payment.memberName?.charAt(0)?.toUpperCase()}
-                            </Avatar>}
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-gray-800 truncate">{payment.memberName}</div>
-                          <div className="text-xs text-gray-400 truncate">{payment.memberReg}</div>
+                <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+                  {selectedRows.map((member) => {
+                    const payAmount = member.payAmount || 200;
+                    const pending = memberPendingClosings[member.id] || [];
+                    const selectedIds = memberSelectedClosings[member.id] || [];
+                    const selectedCount = selectedIds.length;
+                    const amountToPay = selectedCount * payAmount;
+                    const hasPending = pending.length > 0;
+
+                    return (
+                      <div key={member.id}
+                        className={`grid grid-cols-12 items-center gap-1 px-3 py-2.5 border-b last:border-0
+                          ${selectedCount > 0 ? 'bg-white' : hasPending ? 'bg-yellow-50' : 'bg-gray-50'}`}>
+
+                        {/* Member info */}
+                        <div className="col-span-4 flex items-center gap-2 min-w-0">
+                          {member.photoURL
+                            ? <Avatar src={member.photoURL} size={30} className="flex-shrink-0" />
+                            : <Avatar size={30} className="flex-shrink-0"
+                                style={{ background: `hsl(${(member.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontSize: 11, fontWeight: 700 }}>
+                                {member.displayName?.charAt(0)?.toUpperCase()}
+                              </Avatar>}
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-gray-800 truncate">{member.displayName}</div>
+                            <div className="text-xs text-gray-400 truncate">{member.registrationNumber}</div>
+                          </div>
+                        </div>
+
+                        {/* Total pending */}
+                        <div className="col-span-2 text-center">
+                          {hasPending
+                            ? <Tag color="orange" className="text-xs m-0">{pending.length}</Tag>
+                            : <span className="text-xs text-gray-300">—</span>}
+                        </div>
+
+                        {/* Selected closings */}
+                        <div className="col-span-3 text-center">
+                          {hasPending ? (
+                            <div className="flex items-center justify-center gap-1">
+                              <span className={`text-xs font-bold ${selectedCount > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>
+                                {selectedCount}/{pending.length}
+                              </span>
+                              {/* Mini progress bar */}
+                              <div className="flex-1 bg-gray-100 rounded-full h-1 max-w-12">
+                                <div className="h-1 rounded-full bg-indigo-400 transition-all"
+                                  style={{ width: pending.length > 0 ? `${(selectedCount / pending.length) * 100}%` : '0%' }} />
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">No pending</span>
+                          )}
+                        </div>
+
+                        {/* Amount */}
+                        <div className="col-span-2 text-right">
+                          <span className={`text-xs font-bold ${amountToPay > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                            {amountToPay > 0 ? fmt(amountToPay) : '—'}
+                          </span>
+                        </div>
+
+                        {/* Edit button */}
+                        <div className="col-span-1 flex justify-end">
+                          {hasPending && (
+                            <Button size="small" type="text"
+                              icon={<EditOutlined />}
+                              onClick={() => openClosingSelector(member)}
+                              className="text-indigo-500 hover:text-indigo-700 p-0 h-6 w-6" />
+                          )}
                         </div>
                       </div>
-                      <div className="col-span-2 text-right">
-                        <div className="text-xs font-bold text-red-500">{fmt(payment.pendingAmount)}</div>
-                        <div className="text-xs text-gray-400">{payment.pendingClosings} closings</div>
-                      </div>
-                      <div className="col-span-3 text-right">
-                        <div className="text-xs font-black text-green-600">{fmt(payment.amountToPay)}</div>
-                        <div className="text-xs text-gray-400">{payment.closingsToPay} @ {fmt(payment.perClosingAmount)}</div>
-                      </div>
-                      <div className="col-span-2 text-right">
-                        {isFull
-                          ? <Tag color="success" className="text-xs m-0">✅ Full</Tag>
-                          : <Tag color="processing" className="text-xs m-0">Partial</Tag>}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
-          {globalAmount > 0 && remainingAmount > 0 && (
-            <div className="mt-3 bg-yellow-50 rounded-lg p-2 text-center border border-yellow-200">
-              <span className="text-xs text-yellow-700">
-                ⚠️ {fmt(remainingAmount)} राशि बच गई - पर्याप्त members नहीं हैं
-              </span>
+
+          {/* Distribution preview (selected ones only) */}
+          {memberDistribution.length > 0 && (
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-3">
+              <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-2">
+                <CheckCircleOutlined /> Payment Preview ({memberDistribution.length} members)
+              </div>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {memberDistribution.map((d, i) => (
+                  <div key={d.member.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2.5 py-1.5">
+                    <div className="flex items-center gap-2 truncate flex-1">
+                      <span className="text-gray-400 font-mono w-4">{i + 1}</span>
+                      <span className="font-medium truncate">{d.member.displayName}</span>
+                      <Tag color="blue" className="text-xs m-0 px-1">{d.selectedCount} closings</Tag>
+                    </div>
+                    <span className="font-bold text-green-600 ml-2">{fmt(d.amountToPay)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 pt-2 border-t border-green-200 flex justify-between items-center">
+                <span className="text-xs text-green-600 font-medium">Grand Total</span>
+                <span className="text-sm font-black text-green-700">{fmt(grandTotal)}</span>
+              </div>
             </div>
           )}
-        </div>
 
-        <Form form={form} layout="vertical" onFinish={handleSubmit}
-          initialValues={{ paymentDate: dayjs(), paymentMethod: 'cash' }}>
-          <div className="bg-gray-50 rounded-2xl border border-gray-200 p-4 space-y-0">
-            <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-              <CreditCardOutlined className="text-indigo-500" /> Payment Details
-            </div>
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item name="paymentMethod" label="Payment Method" rules={[{ required: true }]} className="mb-3">
-                  <Select size="large" onChange={setPaymentMethod}>
-                    <Option value="cash"><div className="flex items-center gap-2"><WalletOutlined className="text-green-500" /><span>Cash</span></div></Option>
-                    <Option value="online"><div className="flex items-center gap-2"><CreditCardOutlined className="text-blue-500" /><span>Online</span></div></Option>
-                  </Select>
+          {/* Payment form */}
+          <Form form={form} layout="vertical" onFinish={handleSubmit}
+            initialValues={{ paymentDate: dayjs(), paymentMethod: 'cash' }}>
+            <div className="bg-gray-50 rounded-2xl border border-gray-200 p-4 space-y-0">
+              <div className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <CreditCardOutlined className="text-indigo-500" /> Payment Details
+              </div>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="paymentMethod" label="Payment Method" rules={[{ required: true }]} className="mb-3">
+                    <Select size="large" onChange={setPaymentMethod}>
+                      <Option value="cash"><div className="flex items-center gap-2"><WalletOutlined className="text-green-500" /><span>Cash</span></div></Option>
+                      <Option value="online"><div className="flex items-center gap-2"><CreditCardOutlined className="text-blue-500" /><span>Online</span></div></Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="paymentDate" label="Payment Date" rules={[{ required: true }]} className="mb-3">
+                    <DatePicker className="w-full" size="large" format="DD/MM/YYYY" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              {paymentMethod === 'online' && (
+                <Form.Item name="onlineReference" label="Transaction / UTR Reference"
+                  rules={[{ required: true }, { min: 3 }]}
+                  validateStatus={!refValid ? 'error' : checkingRef ? 'validating' : ''}
+                  help={!refValid ? 'Reference already exists' : undefined} className="mb-3">
+                  <Input size="large" placeholder="UTR/Transaction ID"
+                    onChange={async e => {
+                      const v = e.target.value;
+                      if (v.length >= 3) await handleCheckRef(v);
+                      else setRefValid(true);
+                    }}
+                    suffix={
+                      checkingRef ? <Spin size="small" />
+                        : !refValid ? <WarningOutlined className="text-red-500" />
+                          : <CheckCircleOutlined className="text-green-400" />
+                    }
+                  />
                 </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="paymentDate" label="Payment Date" rules={[{ required: true }]} className="mb-3">
-                  <DatePicker className="w-full" size="large" format="DD/MM/YYYY" />
-                </Form.Item>
-              </Col>
-            </Row>
-            {paymentMethod === 'online' && (
-              <Form.Item name="onlineReference" label="Transaction / UTR Reference"
-                rules={[{ required: true }, { min: 3 }]}
-                validateStatus={!refValid ? 'error' : checkingRef ? 'validating' : ''}
-                help={!refValid ? 'Reference already exists' : undefined} className="mb-3">
-                <Input size="large" placeholder="UTR/Transaction ID"
-                  onChange={async e => {
-                    const v = e.target.value;
-                    if (v.length >= 3) await handleCheckRef(v);
-                    else setRefValid(true);
-                  }}
-                  suffix={
-                    checkingRef ? <Spin size="small" />
-                      : !refValid ? <WarningOutlined className="text-red-500" />
-                        : <CheckCircleOutlined className="text-green-400" />
-                  }
-                />
+              )}
+              <Form.Item name="note" label="Note (Optional)" className="mb-0">
+                <TextArea rows={2} placeholder="Add payment notes..." maxLength={200} showCount />
               </Form.Item>
-            )}
-            <Form.Item name="note" label="Note (Optional)" className="mb-0">
-              <TextArea rows={2} placeholder="Add payment notes..." maxLength={200} showCount />
-            </Form.Item>
-          </div>
-        </Form>
-      </div>
-    </Drawer>
+            </div>
+          </Form>
+        </div>
+      </Drawer>
+
+      {/* ✅ Closing Selector Modal */}
+      <ClosingSelectorModal
+        open={selectorModal.open}
+        onClose={() => setSelectorModal({ open: false, member: null })}
+        member={selectorModal.member}
+        pendingClosings={selectorModal.member ? (memberPendingClosings[selectorModal.member.id] || []) : []}
+        selectedClosingIds={selectorModal.member ? (memberSelectedClosings[selectorModal.member.id] || []) : []}
+        onConfirm={(selectedIds) => {
+          if (selectorModal.member) handleClosingConfirm(selectorModal.member.id, selectedIds);
+        }}
+      />
+    </>
   );
 }
 
@@ -752,7 +989,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
 
     setLoading(true);
     try {
-      // ✅ Server side call - token auto-attached
       const result = await processSinglePaymentAPI({
         programId: selectedProgram.id,
         programName: selectedProgram.name,
@@ -770,13 +1006,9 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
       const partialCount = (result.processed || 0) - fullPayments;
 
       if (result.remaining > 0) {
-        message.warning(
-          `Payment of ${fmt(effectiveTotalAmount)} processed but ${fmt(result.remaining)} remains unallocated.`
-        );
+        message.warning(`Payment of ${fmt(effectiveTotalAmount)} processed but ${fmt(result.remaining)} remains unallocated.`);
       } else {
-        message.success(
-          `Payment of ${fmt(result.totalPaid)} distributed across ${result.processed} closing(s). ${fullPayments} fully paid, ${partialCount} partially paid.`
-        );
+        message.success(`Payment of ${fmt(result.totalPaid)} distributed across ${result.processed} closing(s). ${fullPayments} fully paid, ${partialCount} partially paid.`);
       }
 
       onSuccess?.();
@@ -853,7 +1085,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
         initialValues={{ paymentDate: dayjs(), paymentMethod: 'cash', amount: 200 }}
         onFinish={processPayment}>
 
-        {/* STEP 0: Program */}
         {currentStep === 0 && (
           <div className="space-y-4">
             <div className="text-center mb-4">
@@ -864,8 +1095,7 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
               <p className="text-xs text-gray-500">Choose the program for payment</p>
             </div>
             <Form.Item name="program" rules={[{ required: true }]}>
-              <Select placeholder="Select program" size="large" showSearch
-                optionFilterProp="label" onChange={handleProgramSelect}>
+              <Select placeholder="Select program" size="large" showSearch optionFilterProp="label" onChange={handleProgramSelect}>
                 {programList.map(p => (
                   <Option key={p.id} value={p.id} label={p.name}>
                     <div className="flex items-center gap-2">
@@ -881,7 +1111,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
           </div>
         )}
 
-        {/* STEP 1: Member */}
         {currentStep === 1 && (
           <div className="space-y-4">
             <div className="text-center mb-4">
@@ -934,7 +1163,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
           </div>
         )}
 
-        {/* STEP 2: Closings */}
         {currentStep === 2 && (
           <div className="space-y-3">
             <div className="text-center mb-3">
@@ -985,9 +1213,7 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-500">Custom:</span>
                     <InputNumber
-                      placeholder="Auto"
-                      value={customTotalAmount}
-                      onChange={setCustomTotalAmount}
+                      placeholder="Auto" value={customTotalAmount} onChange={setCustomTotalAmount}
                       size="small" prefix="₹" className="w-28" min={0}
                       max={selectedMarriages.length * perClosingAmountValue}
                     />
@@ -1084,7 +1310,6 @@ function AddPaymentDrawer({ open, onClose, programId, programName, programList, 
           </div>
         )}
 
-        {/* STEP 3: Payment Details */}
         {currentStep === 3 && (
           <div className="space-y-4">
             <div className="text-center mb-4">
@@ -1218,14 +1443,11 @@ export default function PaymentPage() {
 
   const gridRef = useRef();
 
-  // ✅ Fetch via server API (fast - parallel queries, token verified)
   const fetchData = useCallback(async () => {
     if (!selectedProgram || !user) return;
     setLoading(true);
     try {
       const { members, summary } = await fetchPaymentDataAPI(selectedProgram.id);
-
-      // Attach agentName from Redux agentList
       const enriched = members.map((member) => {
         const agentFromList = agentList?.find(a => a.id === member.agentId);
         return {
@@ -1233,7 +1455,6 @@ export default function PaymentPage() {
           agentName: agentFromList?.name || agentFromList?.displayName || member.agentName || '',
         };
       });
-
       setMembersData(enriched);
       setSummaryStats(summary);
     } catch (err) {
@@ -1392,7 +1613,6 @@ export default function PaymentPage() {
             <h1 className="text-lg font-bold text-gray-900 m-0">Payment Management</h1>
             {selectedProgram && <p className="text-xs text-gray-400 m-0">{selectedProgram.name}</p>}
           </div>
-
         </div>
 
         {selectedProgram && (

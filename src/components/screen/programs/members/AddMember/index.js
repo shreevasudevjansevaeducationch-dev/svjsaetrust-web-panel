@@ -618,13 +618,13 @@ const AddMember = () => {
         memberData,
         agentIdToUpdate
       );
-      console.log(result,'result')
+
       try {
   await createMemberAccount({
     memberId: result.id,
     displayName: values.displayName,
     photoURL: fileUrls.photo?.url || "",
-    password: generateMemberPassword(values.displayName, values.bobDate) || "Member@123", // optional
+    password: generateMemberPassword(values.displayName, values.bobDate.format('DD-MM-YYYY')) || "Member@123", // optional
     programId: values.program,
     registrationNumber: result.registrationNumber,
     memberCollectionPath: memberCollectionPath,
