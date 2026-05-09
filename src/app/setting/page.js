@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import Contact from '@/components/screen/settings/Contact';
 import Organization from '@/components/screen/settings/organization';
 import TeamMembers from '@/components/screen/settings/TeamMembers';
+import Sessions from '@/components/screen/settings/Sessions';
+import PasswordChange from '@/components/screen/settings/PasswordChange';
+import RulePolicy from '@/components/screen/settings/rulePolicy';
 import {
   BsBank2,
   BsShieldLock,
@@ -11,154 +14,96 @@ import {
   BsPeople,
   BsGear,
   BsChevronRight,
-  BsChevronLeft
+  BsChevronLeft,
+  BsGearFill,
+  BsX,
+  BsList,
 } from 'react-icons/bs';
-import { collection, getDocs, query, deleteDoc, doc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useAuth } from "@/lib/AuthProvider";
-import Sessions from '@/components/screen/settings/Sessions';
-import PasswordChange from '@/components/screen/settings/PasswordChange';
+import { collection, getDocs, query, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useAuth } from '@/lib/AuthProvider';
+
+const menuItems = [
+  {
+    key: 'organization',
+    icon: <BsBank2 size={18} />,
+    label: 'Organization',
+    description: 'Manage trust details and profile',
+  },
+  {
+    key: 'teams',
+    icon: <BsPeople size={18} />,
+    label: 'Team Members',
+    description: 'Manage your organization members',
+  },
+  {
+    key: 'security',
+    icon: <BsShieldLock size={18} />,
+    label: 'Security',
+    description: 'Secure your account and data',
+    subItems: [
+      { key: 'security-password', label: 'Password' },
+      { key: 'security-sessions', label: 'Active Sessions' },
+    ],
+  },
+  {
+    key: 'contact',
+    icon: <BsHeadset size={18} />,
+    label: 'Contact Support',
+    description: 'Get help from our team',
+  },
+  {
+    key: 'Rules & Policies',
+    icon: <BsGearFill size={18} />,
+    label: 'Rules & Policies',
+    description: "View and manage your organization's rules and policies",
+  },
+];
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('organization');
   const [activeSubTab, setActiveSubTab] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
-  const menuItems = [
-    {
-      key: 'organization',
-      icon: <BsBank2 size={18} />,
-      label: 'Organization',
-      description: 'Manage trust details and profile',
-    },
-    {
-      key: 'teams',
-      icon: <BsPeople size={18} />,
-      label: 'Team Members',
-      description: 'Manage your organization members',
-    },
-    {
-      key: 'security',
-      icon: <BsShieldLock size={18} />,
-      label: 'Security',
-      description: 'Secure your account and data',
-      subItems: [
-        { key: 'security-password', label: 'Password' },
-        { key: 'security-sessions', label: 'Active Sessions' },
-      ]
-    },
-    {
-      key: 'contact',
-      icon: <BsHeadset size={18} />,
-      label: 'Contact Support',
-      description: 'Get help from our team',
-    },
-  ];
-
+  // Close mobile sidebar on tab change
   const handleTabClick = (key) => {
     setActiveTab(key);
     setActiveSubTab(null);
+    setMobileSidebarOpen(false);
   };
 
   const handleSubTabClick = (key) => {
     setActiveSubTab(key);
+    setMobileSidebarOpen(false);
   };
 
+  const getActiveMenuItem = () => menuItems.find((item) => item.key === activeTab);
+
   const getTabTitle = () => {
-    const activeMenuItem = menuItems.find(item => item.key === activeTab);
-
+    const activeMenuItem = getActiveMenuItem();
     if (activeSubTab && activeMenuItem?.subItems) {
-      const activeSubItem = activeMenuItem.subItems.find(item => item.key === activeSubTab);
-      return activeSubItem ? activeSubItem.label : activeMenuItem.label;
+      const sub = activeMenuItem.subItems.find((i) => i.key === activeSubTab);
+      return sub ? sub.label : activeMenuItem.label;
     }
-
     return activeMenuItem ? activeMenuItem.label : '';
   };
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'organization':
-        return <Organization />;
-      case 'contact':
-        return <Contact />;
-      case 'teams':
-        return <TeamMembers />;
-      case 'security':
-        return (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-            <h3 className="text-xl font-semibold text-gray-800 mb-6">Security Settings</h3>
-            <p className="text-gray-500">Configure your account security options and privacy settings.</p>
-
-            {activeSubTab === 'security-password' && (
-              <PasswordChange />
-            )}
-
-   
-
-            {activeSubTab === 'security-sessions' && (
-              <Sessions activeTab={activeTab} activeSubTab={activeSubTab} />
-            )}
-
-            {!activeSubTab && (
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                {menuItems.find(item => item.key === 'security')?.subItems.map((subItem) => (
-                  <div
-                    key={subItem.key}
-                    className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors cursor-pointer"
-                    onClick={() => handleSubTabClick(subItem.key)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-500">
-                          <BsShieldLock size={16} />
-                        </div>
-                        <div className="ml-3">
-                          <h5 className="text-base font-medium text-gray-800">{subItem.label}</h5>
-                        </div>
-                      </div>
-                      <BsChevronRight className="text-gray-400" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      default:
-        return (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-8 flex flex-col items-center justify-center h-[calc(100vh-240px)]">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-500 mb-4">
-              {menuItems.find(item => item.key === activeTab)?.icon}
-            </div>
-            <h3 className="text-xl font-medium text-gray-700 mb-2">
-              {getTabTitle()}
-            </h3>
-            <p className="text-gray-500 text-center max-w-md">
-              This section is under development. Please check back soon for updates.
-            </p>
-          </div>
-        );
-    }
-  };
-
-  // Fetch sessions when security-sessions tab is active
+  // Fetch sessions
   useEffect(() => {
     const fetchSessions = async () => {
       if (activeTab === 'security' && activeSubTab === 'security-sessions' && user?.uid) {
         setSessionsLoading(true);
         try {
-          const sessionsRef = collection(db, "users", user.uid, "sessions");
-          const q = query(sessionsRef);
-          const snapshot = await getDocs(q);
+          const sessionsRef = collection(db, 'users', user.uid, 'sessions');
+          const snapshot = await getDocs(query(sessionsRef));
           const data = [];
-          snapshot.forEach(docSnap => {
-            data.push({ id: docSnap.id, ...docSnap.data() });
-          });
+          snapshot.forEach((docSnap) => data.push({ id: docSnap.id, ...docSnap.data() }));
           setSessions(data);
-        } catch (e) {
+        } catch {
           setSessions([]);
         }
         setSessionsLoading(false);
@@ -169,109 +114,234 @@ const SettingsPage = () => {
 
   const handleRevokeSession = async (sessionId) => {
     if (!user?.uid || !sessionId) return;
-    await deleteDoc(doc(db, "users", user.uid, "sessions", sessionId));
-    setSessions(sessions.filter(s => s.id !== sessionId));
+    await deleteDoc(doc(db, 'users', user.uid, 'sessions', sessionId));
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
   };
 
-  return (
-    <div className="flex h-full">
-      {/* Sidebar */}
-      <div
-        className={`transition-all duration-200 bg-white border-r border-gray-200 flex flex-col h-[calc(100vh-64px)] ${sidebarCollapsed ? 'w-20' : 'w-80'}`}
-      >
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
-          <div className={`flex items-center transition-all duration-200 ${sidebarCollapsed ? 'justify-center w-full' : ''}`}>
-            <BsGear className="text-blue-500 mr-2" size={20} />
-            {!sidebarCollapsed && (
-              <span className="text-lg font-bold text-gray-800">Settings</span>
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'organization':
+        return <Organization />;
+      case 'contact':
+        return <Contact />;
+      case 'Rules & Policies':
+        return <RulePolicy />;
+      case 'teams':
+        return <TeamMembers />;
+      case 'security':
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-1">Security Settings</h3>
+            <p className="text-sm text-gray-500 mb-6">
+              Configure your account security options and privacy settings.
+            </p>
+
+            {activeSubTab === 'security-password' && <PasswordChange />}
+            {activeSubTab === 'security-sessions' && (
+              <Sessions activeTab={activeTab} activeSubTab={activeSubTab} />
+            )}
+
+            {!activeSubTab && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                {getActiveMenuItem()?.subItems?.map((subItem) => (
+                  <button
+                    key={subItem.key}
+                    className="flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:bg-blue-50 hover:border-blue-200 transition-all text-left group"
+                    onClick={() => handleSubTabClick(subItem.key)}
+                  >
+                    <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 group-hover:bg-blue-100 transition-colors flex-shrink-0">
+                      <BsShieldLock size={17} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-800">{subItem.label}</p>
+                    </div>
+                    <BsChevronRight size={13} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          <button
-            className="ml-2 p-1 rounded hover:bg-gray-100 transition"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {sidebarCollapsed ? <BsChevronRight size={18} /> : <BsChevronLeft size={18} />}
-          </button>
-        </div>
+        );
+      default:
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 flex flex-col items-center justify-center min-h-64">
+            <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 mb-4">
+              {getActiveMenuItem()?.icon}
+            </div>
+            <h3 className="text-base font-medium text-gray-700 mb-2">{getTabTitle()}</h3>
+            <p className="text-sm text-gray-400 text-center max-w-xs">
+              This section is under development. Please check back soon.
+            </p>
+          </div>
+        );
+    }
+  };
 
-        <div className="flex-1 overflow-y-auto py-4 px-2">
-          <nav className="space-y-1">
-            {menuItems.map((item) => (
-              <div key={item.key} className="mb-1">
-                <button
-                  onClick={() => handleTabClick(item.key)}
-                  className={`w-full flex items-center px-2 py-3 rounded-lg text-left transition-colors ${
-                    activeTab === item.key
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <span
-                    className={`mr-3 flex-shrink-0 ${activeTab === item.key ? 'text-blue-600' : 'text-gray-500'}`}
-                  >
-                    {item.icon}
-                  </span>
-                  {!sidebarCollapsed && (
-                    <div className="flex-1">
-                      <span className="block font-medium">{item.label}</span>
-                      <span className="block text-xs text-gray-500 mt-0.5">
-                        {item.description}
-                      </span>
-                    </div>
-                  )}
-                  {item.subItems && !sidebarCollapsed && (
-                    <BsChevronRight
-                      size={14}
-                      className={`transition-transform ${
-                        activeTab === item.key ? 'rotate-90 text-blue-600' : 'text-gray-400'
-                      }`}
-                    />
-                  )}
-                </button>
-
-                {item.subItems && activeTab === item.key && !sidebarCollapsed && (
-                  <div className="ml-10 mt-1 space-y-1 border-l-2 border-gray-100 pl-3">
-                    {item.subItems.map((subItem) => (
-                      <button
-                        key={subItem.key}
-                        onClick={() => handleSubTabClick(subItem.key)}
-                        className={`w-full text-left py-2 px-3 rounded-md text-sm transition-colors ${
-                          activeSubTab === subItem.key
-                            ? 'text-blue-700 bg-blue-50 font-medium'
-                            : 'text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        {subItem.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </nav>
-        </div>
+  const SidebarContent = () => (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-4 border-b border-gray-100">
+        {!sidebarCollapsed && (
+          <div className="flex items-center gap-2">
+            <BsGear className="text-blue-500" size={18} />
+            <span className="text-base font-semibold text-gray-800">Settings</span>
+          </div>
+        )}
+        {sidebarCollapsed && (
+          <div className="flex justify-center w-full">
+            <BsGear className="text-blue-500" size={18} />
+          </div>
+        )}
+        {/* Collapse toggle — hidden on mobile */}
+        <button
+          className="hidden md:flex p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {sidebarCollapsed ? <BsChevronRight size={14} /> : <BsChevronLeft size={14} />}
+        </button>
+        {/* Close button — mobile only */}
+        <button
+          className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label="Close menu"
+        >
+          <BsX size={20} />
+        </button>
       </div>
 
-      {/* Main Content */}
-      <div className=" bg-gray-50 p-4 overflow-y-auto">
-        <div className="mb-2">
-          <div className="flex items-center text-sm text-gray-500 mb-2">
-            <span>Settings</span>
-            <BsChevronRight size={12} className="mx-2" />
-            <span>{getTabTitle()}</span>
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+        {menuItems.map((item) => {
+          const isActive = activeTab === item.key;
+          const hasSubItems = !!item.subItems;
+          const isExpanded = isActive && hasSubItems;
+
+          return (
+            <div key={item.key}>
+              <button
+                onClick={() => handleTabClick(item.key)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-left ${
+                  isActive
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+              >
+                <span
+                  className={`flex-shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`}
+                >
+                  {item.icon}
+                </span>
+
+                {!sidebarCollapsed && (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.label}</p>
+                      <p className="text-xs text-gray-400 truncate mt-0.5">{item.description}</p>
+                    </div>
+                    {hasSubItems && (
+                      <BsChevronRight
+                        size={12}
+                        className={`flex-shrink-0 text-gray-400 transition-transform duration-200 ${
+                          isExpanded ? 'rotate-90' : ''
+                        }`}
+                      />
+                    )}
+                  </>
+                )}
+              </button>
+
+              {/* Sub-items */}
+              {isExpanded && !sidebarCollapsed && (
+                <div className="ml-9 pl-3 border-l border-gray-200 mt-1 mb-1 space-y-0.5">
+                  {item.subItems.map((sub) => (
+                    <button
+                      key={sub.key}
+                      onClick={() => handleSubTabClick(sub.key)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
+                        activeSubTab === sub.key
+                          ? 'bg-blue-50 text-blue-700 font-medium'
+                          : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                      }`}
+                    >
+                      {sub.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </nav>
+    </>
+  );
+
+  return (
+    <div className="flex h-full bg-gray-50 relative">
+
+      {/* Mobile overlay */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-20 md:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar — desktop */}
+      <aside
+        className={`hidden md:flex flex-col bg-white border-r border-gray-200 h-[calc(100vh-64px)] sticky top-0 transition-all duration-200 ${
+          sidebarCollapsed ? 'w-[60px]' : 'w-[260px]'
+        }`}
+      >
+        <SidebarContent />
+      </aside>
+
+      {/* Sidebar — mobile drawer */}
+      <aside
+        className={`fixed top-0 left-0 h-full z-30 flex flex-col bg-white border-r border-gray-200 w-72 transition-transform duration-200 md:hidden ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <SidebarContent />
+      </aside>
+
+      {/* Main content */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+        {/* Top bar */}
+        <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex items-center gap-3 sticky top-0 z-10">
+          {/* Mobile menu toggle */}
+          <button
+            className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <BsList size={20} />
+          </button>
+
+          {/* Breadcrumb */}
+          <nav className="flex items-center gap-1.5 text-sm text-gray-400 min-w-0">
+            <span className="hidden sm:inline">Settings</span>
+            <BsChevronRight size={11} className="hidden sm:inline flex-shrink-0" />
+            <span className="text-gray-700 font-medium truncate">{getActiveMenuItem()?.label}</span>
             {activeSubTab && (
               <>
-                <BsChevronRight size={12} className="mx-2" />
-                <span>
-                  {menuItems.find(item => item.key === activeTab)?.subItems?.find(subItem => subItem.key === activeSubTab)?.label}
+                <BsChevronRight size={11} className="flex-shrink-0" />
+                <span className="text-gray-700 font-medium truncate">
+                  {getActiveMenuItem()?.subItems?.find((s) => s.key === activeSubTab)?.label}
                 </span>
               </>
             )}
+          </nav>
+        </div>
+
+        {/* Page content */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+          <div className="max-w-3xl w-full mx-auto">
+            {renderContent()}
           </div>
         </div>
-        {renderContent()}
-      </div>
+      </main>
     </div>
   );
 };
