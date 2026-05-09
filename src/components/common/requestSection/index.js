@@ -4,7 +4,7 @@ import { getData, updateData } from '@/lib/services/firebaseService';
 import { useAuth } from '@/lib/AuthProvider';
 import { useDispatch, useSelector } from 'react-redux';
 import { UserOutlined, PhoneOutlined, HomeOutlined, FileOutlined, CalendarOutlined, MailOutlined, IdcardOutlined, EnvironmentOutlined, ContactsOutlined, DollarOutlined, FilePdfOutlined, LockOutlined, EyeOutlined, DownloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { Drawer, Button, Input, Modal, Card, Avatar, Tabs, Descriptions, Image as AntImage, Spin, Empty, Typography, Form, Checkbox, Tooltip, Tag, Popconfirm, Badge, Divider, App, Select, Radio } from 'antd';
+import { Drawer, Button, Input, Modal, Card, Avatar, Tabs, Descriptions, Image as AntImage, Spin, Empty, Typography, Form, Checkbox, Tooltip, Tag, Popconfirm, Badge, Divider, App, Select, Radio, Row, Col } from 'antd';
 import MemberDetailsView from '@/components/screen/programs/members/MemberDetailsView';
 import EditMember from '@/components/screen/programs/members/EditMember';
 import dayjs from 'dayjs';
@@ -206,6 +206,7 @@ const showAcceptModal = (member) => {
         status: 'accepted',
         active_flag: true,
         joinFeesDone: values.joinFeesDone || false,
+        closingMonths: values.closingMonths || 0,
         joinFeesTxtId: values.joinFeesTxtId || "",
         joinFeesPaymentType: values.joinFeesPaymentType || "",
         joinFeesPaidAmount: joinFeesPaidAmount,
@@ -846,6 +847,37 @@ ${values.joinFeesDone ? `Join Fees: ₹${joinFeesPaidAmount}` : 'Join Fees: Pend
                 )
               }
             </Form.Item>
+            <Divider orientation="left">सदस्यता समाप्ति</Divider>
+<Card size="small">
+  <Row gutter={16}>
+    <Col span={24}>
+      <Form.Item
+        name="closingMonths"
+        label="सदस्यता समाप्ति महीने (Membership Closing Months)"
+        tooltip="कितने महीनों बाद यह सदस्य बंद/निष्क्रिय हो जाएगा?"
+        rules={[
+          { 
+            validator: (_, value) => {
+              if (value && (value < 0 || value > 120)) {
+                return Promise.reject(new Error('कृपया 0 से 120 महीनों के बीच मान दर्ज करें'));
+              }
+              return Promise.resolve();
+            }
+          }
+        ]}
+      >
+        <Input
+          type="number"
+          size="large"
+          placeholder="महीनों की संख्या दर्ज करें (उदा: 6, 12, 24)"
+          prefix={<CalendarOutlined />}
+          suffix="महीने"
+     
+        />
+      </Form.Item>
+    </Col>
+  </Row>
+</Card>
           </Form>
         </Modal>
 

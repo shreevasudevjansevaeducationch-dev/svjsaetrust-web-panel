@@ -232,6 +232,7 @@ useEffect(() => {
       pinCode: memberData.pinCode,
       program: memberData.programId,
       ageGroup: memberData.ageGroup,
+      closingMonths: memberData.closingMonths || 0,
       locationGroup: selectedLocationGroup?.id || undefined,
       addedBy: memberData.addedBy || 'admin',
       selectedAgent: memberData.agentId || undefined,
@@ -473,6 +474,7 @@ console.log(values,'values')
         state: values.state,
         district: values.district,
         pinCode: values.pinCode,
+        closingMonths: values.closingMonths || 0,
         ageGroup: selectedAgeGroup?.id,
         ageGroupRange: `${selectedAgeGroup?.startAge}-${selectedAgeGroup?.endAge}`,
         memberGroup: selectedLocationGroup?.groupName || 'Group_A',
@@ -1264,7 +1266,40 @@ console.log(values,'values')
                 </Col>
               )}
             </Row>
-
+<Divider orientation="left">सदस्यता समाप्ति</Divider>
+<Card size="small">
+  <Row gutter={16}>
+    <Col span={24}>
+      <Form.Item
+        name="closingMonths"
+        label="सदस्यता समाप्ति महीने (Membership Closing Months)"
+        tooltip="कितने महीनों बाद यह सदस्य बंद/निष्क्रिय हो जाएगा?"
+        rules={[
+          { 
+            validator: (_, value) => {
+              if (value && (value < 0 || value > 120)) {
+                return Promise.reject(new Error('कृपया 0 से 120 महीनों के बीच मान दर्ज करें'));
+              }
+              return Promise.resolve();
+            }
+          }
+        ]}
+      >
+        <Input
+          type="number"
+          size="large"
+          placeholder="महीनों की संख्या दर्ज करें (उदा: 6, 12, 24)"
+          prefix={<CalendarOutlined />}
+          suffix="महीने"
+          onChange={(e) => {
+            const months = parseInt(e.target.value);
+            setClosingDays(months);
+          }}
+        />
+      </Form.Item>
+    </Col>
+  </Row>
+</Card>
             {/* Hidden field for age group ID */}
             <Form.Item name="ageGroup" hidden>
               <Input />
