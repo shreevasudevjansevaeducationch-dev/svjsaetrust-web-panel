@@ -1,456 +1,457 @@
 "use client";
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Button, Space, Card, Tooltip, Divider, App } from 'antd';
-import { FiPlusCircle, FiPhone, FiMail, FiMapPin, FiGlobe, FiTrash2, FiEdit2 } from 'react-icons/fi';
+import { Modal, Form, Input, Button, Space, Tooltip, Divider, App, Skeleton } from 'antd';
+import { FiPlusCircle, FiPhone, FiMail, FiMapPin, FiGlobe, FiTrash2, FiEdit2, FiExternalLink } from 'react-icons/fi';
 import { FaFacebook, FaTwitter, FaInstagram, FaLinkedin, FaYoutube } from 'react-icons/fa';
 import { collection, addDoc, getDocs, query, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from '@/lib/AuthProvider';
 
-const dummyData = {
-  phones: [
-    { personName: 'John Doe', phone: '+1 (555) 123-4567', designation: 'Trust Manager' },
-    { personName: 'Jane Smith', phone: '+1 (555) 987-6543', designation: 'Administrative Head' },
-  ],
-  emails: [
-    { email: 'info@trustorg.com' },
-    { email: 'support@trustorg.com' },
-  ],
-  address: '123 Trust Avenue, Financial District, New York, NY 10004',
-  website: 'https://www.trustorg.com',
-  socialLinks: {
-    facebook: 'https://facebook.com/trustorg',
-    twitter: 'https://twitter.com/trustorg',
-    instagram: 'https://instagram.com/trustorg',
-    linkedin: 'https://linkedin.com/company/trustorg',
-    youtube: 'https://youtube.com/trustorg'
-  }
+// ─── Helper: strip undefined values recursively ───────────────────────────────
+// Firestore throws if ANY field value is `undefined`. This replaces them with null.
+const sanitize = (obj) => {
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitize);
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [k, sanitize(v)])
+  );
 };
 
+// ─── Social platform config ───────────────────────────────────────────────────
+const SOCIAL_PLATFORMS = [
+  { key: 'facebook',  label: 'Facebook',  Icon: FaFacebook,  color: '#1877F2', placeholder: 'https://facebook.com/yourpage' },
+  { key: 'twitter',   label: 'Twitter',   Icon: FaTwitter,   color: '#1DA1F2', placeholder: 'https://twitter.com/yourhandle' },
+  { key: 'instagram', label: 'Instagram', Icon: FaInstagram, color: '#E1306C', placeholder: 'https://instagram.com/yourprofile' },
+  { key: 'linkedin',  label: 'LinkedIn',  Icon: FaLinkedin,  color: '#0A66C2', placeholder: 'https://linkedin.com/company/yourorg' },
+  { key: 'youtube',   label: 'YouTube',   Icon: FaYoutube,   color: '#FF0000', placeholder: 'https://youtube.com/yourchannel' },
+];
+
+// ─── Small reusable section wrapper ──────────────────────────────────────────
+const InfoCard = ({ icon: Icon, title, children, onEdit, loading }) => (
+  <div style={{
+    background: 'var(--color-bg, #fff)',
+    border: '1px solid #f0f0f0',
+    borderRadius: 14,
+    overflow: 'hidden',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+    transition: 'box-shadow .2s',
+  }}
+    onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'}
+    onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.05)'}
+  >
+    {/* Card header */}
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '14px 18px', borderBottom: '1px solid #f5f5f5',
+      background: '#fafafa',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8,
+          background: '#EBF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Icon size={15} color="#185FA5" />
+        </div>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{title}</span>
+      </div>
+      {onEdit && (
+        <Tooltip title={`Edit ${title}`}>
+          <button onClick={onEdit} style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '5px 10px', borderRadius: 7, border: '1px solid #e8e8e8',
+            background: '#fff', cursor: 'pointer', fontSize: 12,
+            color: '#185FA5', fontWeight: 500, transition: 'all .15s',
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#EBF4FF'; e.currentTarget.style.borderColor = '#B5D4F4'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e8e8e8'; }}
+          >
+            <FiEdit2 size={12} /> Edit
+          </button>
+        </Tooltip>
+      )}
+    </div>
+    {/* Card body */}
+    <div style={{ padding: '16px 18px' }}>
+      {loading ? <Skeleton active paragraph={{ rows: 2 }} title={false} /> : children}
+    </div>
+  </div>
+);
+
+// ─── Modal section wrapper ────────────────────────────────────────────────────
+const ModalSection = ({ icon: Icon, title, children }) => (
+  <div style={{
+    border: '1px solid #f0f0f0', borderRadius: 12, padding: '16px 18px',
+    marginBottom: 20, background: '#fafafa',
+  }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <Icon size={15} color="#185FA5" />
+      <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{title}</span>
+    </div>
+    {children}
+  </div>
+);
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 const Contact = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const { user } = useAuth();
   const [contactData, setContactData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const {message}=App.useApp();
+  const [saving, setSaving] = useState(false);
+  const { message } = App.useApp();
   const [contactId, setContactId] = useState(null);
 
+  // ── Fetch ──
   const fetchContactData = async () => {
     if (!user?.uid) return;
     try {
       const contactRef = collection(db, "users", user.uid, "contact");
-      const querySnapshot = await getDocs(query(contactRef));
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        setContactId(doc.id);
-        setContactData(doc.data());
+      const snapshot = await getDocs(query(contactRef));
+      if (!snapshot.empty) {
+        const d = snapshot.docs[0];
+        setContactId(d.id);
+        setContactData(d.data());
       }
-    } catch (error) {
-      console.error("Error fetching contact data:", error);
+    } catch (err) {
+      console.error("Error fetching contact:", err);
       message.error("Failed to load contact information");
     } finally {
       setLoading(false);
     }
   };
-  useEffect(() => {
-    fetchContactData();
-  }, [user]);
 
+  useEffect(() => { fetchContactData(); }, [user]);
+
+  // ── Save ──
   const handleSubmit = async (values) => {
-    if (!user?.uid) {
-      message.error("User not authenticated!");
-      return;
-    }
-    
+    if (!user?.uid) { message.error("User not authenticated!"); return; }
+    setSaving(true);
     try {
-      setLoading(true);
-      const contactData = {
-        phones: values.phones || [],
-        emails: values.emails || [],
-        address: values.address,
-        website: values.website,
+      // FIX: replace every undefined with null before sending to Firestore
+      const payload = sanitize({
+        phones:  values.phones  || [],
+        emails:  values.emails  || [],
+        address: values.address || null,
+        website: values.website || null,
         socialLinks: {
-          facebook: values.facebook,
-          twitter: values.twitter,
-          instagram: values.instagram,
-          linkedin: values.linkedin,
-          youtube: values.youtube
+          facebook:  values.facebook  || null,
+          twitter:   values.twitter   || null,
+          instagram: values.instagram || null,
+          linkedin:  values.linkedin  || null,
+          youtube:   values.youtube   || null,
         },
         updatedAt: new Date(),
-      };
+      });
 
       if (contactId) {
-        // Update existing document
-        const docRef = doc(db, "users", user.uid, "contact", contactId);
-        await updateDoc(docRef, contactData);
+        await updateDoc(doc(db, "users", user.uid, "contact", contactId), payload);
       } else {
-        // Create new document
-        const contactRef = collection(db, "users", user.uid, "contact");
-        await addDoc(contactRef, {
-          ...contactData,
+        await addDoc(collection(db, "users", user.uid, "contact"), {
+          ...payload,
           createdAt: new Date(),
-          createdBy: user.uid
+          createdBy: user.uid,
         });
       }
 
-      message.success('Contact information updated successfully!');
+      message.success('Contact information saved successfully!');
       setIsModalOpen(false);
-      fetchContactData(); // Refresh the data
-    } catch (error) {
-      console.error("Error saving contact:", error);
-      message.error('Failed to update contact information');
+      fetchContactData();
+    } catch (err) {
+      console.error("Error saving contact:", err);
+      message.error('Failed to save contact information');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
+  // ── Open modal pre-filled ──
   const handleEdit = () => {
     form.setFieldsValue({
-      phones: contactData?.phones || [],
-      emails: contactData?.emails || [],
-      address: contactData?.address,
-      website: contactData?.website,
-      ...contactData?.socialLinks
+      phones:  contactData?.phones  || [],
+      emails:  contactData?.emails  || [],
+      address: contactData?.address || '',
+      website: contactData?.website || '',
+      ...(contactData?.socialLinks || {}),
     });
     setIsModalOpen(true);
   };
 
-  const handleCancel = () => {
-    form.resetFields();
-    setIsModalOpen(false);
-  };
+  const handleCancel = () => { form.resetFields(); setIsModalOpen(false); };
+
+  // ── Derived ──
+  const activeSocials = SOCIAL_PLATFORMS.filter(p => contactData?.socialLinks?.[p.key]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div style={{ maxWidth: 900 }}>
+
+      {/* ── Page header ── */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        marginBottom: 28, flexWrap: 'wrap', gap: 12,
+      }}>
         <div>
-          <h1 className="text-2xl font-bold text-[var(--foreground)]">Contact Information</h1>
-          <p className="text-[var(--gray-300)] mt-1">Manage your organization's contact details</p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', margin: 0 }}>
+            Contact Information
+          </h1>
+          <p style={{ color: '#888', marginTop: 4, fontSize: 14 }}>
+            Manage your organisation's contact details and social presence
+          </p>
         </div>
-        <Button 
-          type="primary"
-          size="large"
-          icon={<FiPlusCircle className="mr-2" />}
+        <button
           onClick={() => setIsModalOpen(true)}
-          className="bg-[var(--primary-blue)] hover:bg-[var(--primary-dark)]"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '9px 18px', borderRadius: 10,
+            background: '#185FA5', border: 'none', cursor: 'pointer',
+            color: '#fff', fontSize: 14, fontWeight: 600,
+            boxShadow: '0 2px 8px rgba(24,95,165,0.25)',
+            transition: 'all .15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#0C447C'}
+          onMouseLeave={e => e.currentTarget.style.background = '#185FA5'}
         >
-          Add Contact Info
-        </Button>
+          <FiPlusCircle size={16} />
+          {contactData ? 'Edit Contact Info' : 'Add Contact Info'}
+        </button>
       </div>
 
-      {/* Contact Information Display */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Phone Numbers Card */}
-        <Card 
-          loading={loading}
-          title={
-            <span className="flex items-center text-lg font-medium">
-              <FiPhone className="mr-2 text-[var(--primary-blue)]" /> Contact Numbers
-            </span>
-          }
-          extra={
-            <Tooltip title="Edit Phone Numbers">
-              <Button 
-                type="text" 
-                icon={<FiEdit2 />} 
-                onClick={handleEdit}
-                className="text-[var(--primary-blue)] hover:text-[var(--primary-dark)]"
-              />
-            </Tooltip>
-          }
-          className="shadow-sm hover:shadow-md transition-shadow"
-        >
-          <div className="space-y-4">
-            {(contactData?.phones || []).map((phone, index) => (
-              <div key={index} className="pb-3 border-b last:border-0 border-[var(--gray-200)]">
-                <h4 className="font-medium text-[var(--foreground)]">{phone.personName}</h4>
-                <p className="text-[var(--gray-300)] text-sm">{phone.designation}</p>
-                <p className="text-[var(--primary-blue)] mt-1">{phone.phone}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
+      {/* ── Cards grid ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 18 }}>
 
-        {/* Email & Website Card */}
-        <Card 
-          loading={loading}
-          title={
-            <span className="flex items-center text-lg font-medium">
-              <FiMail className="mr-2 text-[var(--primary-blue)]" /> Email & Web
-            </span>
-          }
-          extra={
-            <Tooltip title="Edit Contact Info">
-              <Button 
-                type="text" 
-                icon={<FiEdit2 />} 
-                onClick={handleEdit}
-                className="text-[var(--primary-blue)] hover:text-[var(--primary-dark)]"
-              />
-            </Tooltip>
-          }
-          className="shadow-sm hover:shadow-md transition-shadow"
-        >
-          <div className="space-y-4">
-            {(contactData?.emails || []).map((email, index) => (
-              <p key={index} className="text-[var(--foreground)]">{email.email}</p>
-            ))}
-            <Divider className="my-3" />
-            <div className="flex items-center gap-2">
-              <FiGlobe className="text-[var(--primary-blue)]" />
-              <a 
-                href={contactData?.website} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-[var(--primary-blue)] hover:underline"
-              >
-                {contactData?.website?.replace('https://', '') || 'Not set'}
-              </a>
+        {/* Phone numbers */}
+        <InfoCard icon={FiPhone} title="Contact Numbers" onEdit={handleEdit} loading={loading}>
+          {(contactData?.phones?.length ?? 0) === 0 ? (
+            <p style={{ color: '#bbb', fontSize: 13 }}>No phone numbers added yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {contactData.phones.map((p, i) => (
+                <div key={i} style={{
+                  paddingBottom: i < contactData.phones.length - 1 ? 12 : 0,
+                  borderBottom: i < contactData.phones.length - 1 ? '1px solid #f0f0f0' : 'none',
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#1a1a2e' }}>{p.personName}</div>
+                  {p.designation && (
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 1 }}>{p.designation}</div>
+                  )}
+                  <a href={`tel:${p.phone}`} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    marginTop: 4, color: '#185FA5', fontSize: 13, fontWeight: 500,
+                    textDecoration: 'none',
+                  }}>
+                    <FiPhone size={12} /> {p.phone}
+                  </a>
+                </div>
+              ))}
             </div>
-          </div>
-        </Card>
+          )}
+        </InfoCard>
 
-        {/* Address Card */}
-        <Card 
-          loading={loading}
-          title={
-            <span className="flex items-center text-lg font-medium">
-              <FiMapPin className="mr-2 text-[var(--primary-blue)]" /> Address
-            </span>
-          }
-          extra={
-            <Tooltip title="Edit Address">
-              <Button 
-                type="text" 
-                icon={<FiEdit2 />} 
-                onClick={handleEdit}
-                className="text-[var(--primary-blue)] hover:text-[var(--primary-dark)]"
-              />
-            </Tooltip>
-          }
-          className="shadow-sm hover:shadow-md transition-shadow"
-        >
-          <p className="text-[var(--foreground)] whitespace-pre-line">
-            {contactData?.address || 'No address set'}
-          </p>
-        </Card>
+        {/* Email & website */}
+        <InfoCard icon={FiMail} title="Email & Website" onEdit={handleEdit} loading={loading}>
+          {(contactData?.emails?.length ?? 0) === 0 && !contactData?.website ? (
+            <p style={{ color: '#bbb', fontSize: 13 }}>No email or website added yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(contactData?.emails || []).map((e, i) => (
+                <a key={i} href={`mailto:${e.email}`} style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  color: '#185FA5', fontSize: 13, textDecoration: 'none',
+                }}>
+                  <FiMail size={13} color="#185FA5" /> {e.email}
+                </a>
+              ))}
+              {contactData?.emails?.length > 0 && contactData?.website && (
+                <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 10, marginTop: 2 }} />
+              )}
+              {contactData?.website && (
+                <a href={contactData.website} target="_blank" rel="noopener noreferrer" style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  color: '#185FA5', fontSize: 13, textDecoration: 'none',
+                }}>
+                  <FiGlobe size={13} color="#185FA5" />
+                  {contactData.website.replace(/^https?:\/\//, '')}
+                  <FiExternalLink size={11} color="#aaa" />
+                </a>
+              )}
+            </div>
+          )}
+        </InfoCard>
 
-        {/* Social Links Card */}
-        <Card 
-          loading={loading}
-          title={
-            <span className="flex items-center text-lg font-medium">
-              <FiGlobe className="mr-2 text-[var(--primary-blue)]" /> Social Media
-            </span>
-          }
-          extra={
-            <Tooltip title="Edit Social Links">
-              <Button 
-                type="text" 
-                icon={<FiEdit2 />} 
-                onClick={handleEdit}
-                className="text-[var(--primary-blue)] hover:text-[var(--primary-dark)]"
-              />
-            </Tooltip>
-          }
-          className="shadow-sm hover:shadow-md transition-shadow"
-        >
-          <div className="grid grid-cols-2 gap-4">
-            {Object.entries(contactData?.socialLinks || {}).map(([platform, url]) => (
-              url && (
+        {/* Address */}
+        <InfoCard icon={FiMapPin} title="Address" onEdit={handleEdit} loading={loading}>
+          {contactData?.address ? (
+            <p style={{ fontSize: 14, color: '#444', lineHeight: 1.7, margin: 0 }}>
+              {contactData.address}
+            </p>
+          ) : (
+            <p style={{ color: '#bbb', fontSize: 13 }}>No address added yet.</p>
+          )}
+        </InfoCard>
+
+        {/* Social media */}
+        <InfoCard icon={FiGlobe} title="Social Media" onEdit={handleEdit} loading={loading}>
+          {activeSocials.length === 0 ? (
+            <p style={{ color: '#bbb', fontSize: 13 }}>No social links added yet.</p>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {activeSocials.map(({ key, label, Icon, color }) => (
                 <a
-                  key={platform}
-                  href={url}
+                  key={key}
+                  href={contactData.socialLinks[key]}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-[var(--foreground)] hover:text-[var(--primary-blue)]"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 10px', borderRadius: 9,
+                    border: '1px solid #f0f0f0', background: '#fafafa',
+                    textDecoration: 'none', color: '#333', fontSize: 13, fontWeight: 500,
+                    transition: 'all .15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = color + '40'; e.currentTarget.style.color = color; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#fafafa'; e.currentTarget.style.borderColor = '#f0f0f0'; e.currentTarget.style.color = '#333'; }}
                 >
-                  {platform === 'facebook' && <FaFacebook />}
-                  {platform === 'twitter' && <FaTwitter />}
-                  {platform === 'instagram' && <FaInstagram />}
-                  {platform === 'linkedin' && <FaLinkedin />}
-                  {platform === 'youtube' && <FaYoutube />}
-                  {platform.charAt(0).toUpperCase() + platform.slice(1)}
+                  <Icon size={15} color={color} />
+                  {label}
                 </a>
-              )
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+          )}
+        </InfoCard>
       </div>
 
+      {/* ── Modal ── */}
       <Modal
-        title={<h3 className="text-xl font-semibold text-[var(--foreground)]">Contact Details</h3>}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 2 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 9,
+              background: '#EBF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <FiEdit2 size={15} color="#185FA5" />
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e' }}>Contact Details</div>
+              <div style={{ fontSize: 12, color: '#999', fontWeight: 400 }}>Update your organisation's contact information</div>
+            </div>
+          </div>
+        }
         open={isModalOpen}
         onCancel={handleCancel}
         footer={null}
-        width={800}
-        className="custom-modal"
+        width={780}
+        styles={{ body: { maxHeight: '72vh', overflowY: 'auto', paddingTop: 8 } }}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-          className="mt-4"
-        >
-          {/* Phone Numbers Section */}
-          <div className="border border-[var(--gray-200)] rounded-lg p-4 mb-6">
-            <h4 className="text-lg font-medium mb-4 flex items-center">
-              <FiPhone className="mr-2" /> Phone Numbers
-            </h4>
+        <Form form={form} layout="vertical" onFinish={handleSubmit}>
+
+          {/* Phone numbers */}
+          <ModalSection icon={FiPhone} title="Phone Numbers">
             <Form.List name="phones">
               {(fields, { add, remove }) => (
                 <>
                   {fields.map(({ key, name }) => (
-                    <Space key={key} className="flex items-start mb-2 w-full" align="baseline">
-                      <Form.Item
-                        name={[name, 'personName']}
-                        rules={[{ required: true, message: 'Name required' }]}
-                      >
-                        <Input placeholder="Contact Person Name" className="w-48" />
+                    <div key={key} style={{
+                      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto',
+                      gap: 8, marginBottom: 8, alignItems: 'flex-start',
+                    }}>
+                      <Form.Item name={[name, 'personName']} rules={[{ required: true, message: 'Name required' }]} style={{ margin: 0 }}>
+                        <Input placeholder="Contact person name" size="middle" />
                       </Form.Item>
-                      <Form.Item
-                        name={[name, 'phone']}
-                        rules={[{ required: true, message: 'Phone number required' }]}
-                      >
-                        <Input placeholder="Enter phone number" className="w-48" />
+                      <Form.Item name={[name, 'phone']} rules={[{ required: true, message: 'Phone required' }]} style={{ margin: 0 }}>
+                        <Input placeholder="Phone number" size="middle" />
                       </Form.Item>
-                      <Form.Item
-                        name={[name, 'designation']}
-                      >
-                        <Input placeholder="Designation (optional)" className="w-48" />
+                      <Form.Item name={[name, 'designation']} style={{ margin: 0 }}>
+                        <Input placeholder="Designation (optional)" size="middle" />
                       </Form.Item>
-                      <Button 
-                        type="text" 
+                      <Button
+                        type="text" danger
+                        icon={<FiTrash2 size={14} />}
                         onClick={() => remove(name)}
-                        icon={<FiTrash2 className="text-[var(--error)]" />} 
+                        style={{ marginTop: 1 }}
                       />
-                    </Space>
+                    </div>
                   ))}
-                  <Button 
-                    type="dashed" 
-                    onClick={() => add()} 
-                    className="w-full"
-                    icon={<FiPlusCircle className="mr-2" />}
-                  >
-                    Add Contact Person
+                  <Button type="dashed" onClick={() => add()} block icon={<FiPlusCircle size={14} />}>
+                    Add contact person
                   </Button>
                 </>
               )}
             </Form.List>
-          </div>
+          </ModalSection>
 
-          {/* Email Addresses Section */}
-          <div className="border border-[var(--gray-200)] rounded-lg p-4 mb-6">
-            <h4 className="text-lg font-medium mb-4 flex items-center">
-              <FiMail className="mr-2" /> Email Addresses
-            </h4>
+          {/* Email addresses */}
+          <ModalSection icon={FiMail} title="Email Addresses">
             <Form.List name="emails">
               {(fields, { add, remove }) => (
                 <>
                   {fields.map(({ key, name }) => (
-                    <Space key={key} className="flex items-start mb-2">
+                    <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
                       <Form.Item
                         name={[name, 'email']}
                         rules={[
                           { required: true, message: 'Email required' },
-                          { type: 'email', message: 'Invalid email' }
+                          { type: 'email', message: 'Enter a valid email' },
                         ]}
+                        style={{ margin: 0, flex: 1 }}
                       >
-                        <Input placeholder="Enter email address" className="w-64" />
+                        <Input placeholder="Email address" size="middle" />
                       </Form.Item>
-                      <Button 
-                        type="text" 
+                      <Button
+                        type="text" danger
+                        icon={<FiTrash2 size={14} />}
                         onClick={() => remove(name)}
-                        icon={<FiTrash2 className="text-[var(--error)]" />} 
+                        style={{ marginTop: 1 }}
                       />
-                    </Space>
+                    </div>
                   ))}
-                  <Button 
-                    type="dashed" 
-                    onClick={() => add()} 
-                    className="w-full"
-                    icon={<FiPlusCircle className="mr-2" />}
-                  >
-                    Add Email Address
+                  <Button type="dashed" onClick={() => add()} block icon={<FiPlusCircle size={14} />}>
+                    Add email address
                   </Button>
                 </>
               )}
             </Form.List>
-          </div>
+          </ModalSection>
 
-          {/* Address Section */}
-          <div className="border border-[var(--gray-200)] rounded-lg p-4 mb-6">
-            <h4 className="text-lg font-medium mb-4 flex items-center">
-              <FiMapPin className="mr-2" /> Address
-            </h4>
-            <Form.Item
-              name="address"
-              rules={[{ required: true, message: 'Address required' }]}
-            >
-              <Input.TextArea 
-                rows={3} 
-                placeholder="Enter complete address"
-              />
+          {/* Address */}
+          <ModalSection icon={FiMapPin} title="Address">
+            <Form.Item name="address" rules={[{ required: true, message: 'Address is required' }]} style={{ margin: 0 }}>
+              <Input.TextArea rows={3} placeholder="Enter complete address" />
             </Form.Item>
-          </div>
+          </ModalSection>
 
-          {/* Website & Social Links */}
-          <div className="border border-[var(--gray-200)] rounded-lg p-4 mb-6">
-            <h4 className="text-lg font-medium mb-4 flex items-center">
-              <FiGlobe className="mr-2" /> Website & Social Media
-            </h4>
-            
-            <Form.Item
-              name="website"
-              label="Website URL"
-            >
-              <Input placeholder="https://www.example.com" />
+          {/* Website & social */}
+          <ModalSection icon={FiGlobe} title="Website & Social Media">
+            <Form.Item name="website" label="Website URL" style={{ marginBottom: 16 }}>
+              <Input prefix={<FiGlobe size={13} color="#aaa" />} placeholder="https://www.example.com" />
             </Form.Item>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item name="facebook" label={<span className="flex items-center"><FaFacebook className="mr-2" /> Facebook</span>}>
-                <Input placeholder="Facebook profile URL" />
-              </Form.Item>
-              
-              <Form.Item name="twitter" label={<span className="flex items-center"><FaTwitter className="mr-2" /> Twitter</span>}>
-                <Input placeholder="Twitter profile URL" />
-              </Form.Item>
-              
-              <Form.Item name="instagram" label={<span className="flex items-center"><FaInstagram className="mr-2" /> Instagram</span>}>
-                <Input placeholder="Instagram profile URL" />
-              </Form.Item>
-              
-              <Form.Item name="linkedin" label={<span className="flex items-center"><FaLinkedin className="mr-2" /> LinkedIn</span>}>
-                <Input placeholder="LinkedIn profile URL" />
-              </Form.Item>
-              
-              <Form.Item 
-                name="youtube" 
-                label={
-                  <span className="flex items-center">
-                    <FaYoutube className="mr-2 text-[var(--error)]" /> 
-                    YouTube
-                  </span>
-                }
-              >
-                <Input placeholder="YouTube channel URL" />
-              </Form.Item>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+              {SOCIAL_PLATFORMS.map(({ key, label, Icon, color, placeholder }) => (
+                <Form.Item
+                  key={key}
+                  name={key}
+                  label={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Icon size={13} color={color} /> {label}
+                    </span>
+                  }
+                  style={{ marginBottom: 12 }}
+                >
+                  <Input placeholder={placeholder} />
+                </Form.Item>
+              ))}
             </div>
-          </div>
+          </ModalSection>
 
-          <div className="flex justify-end gap-3">
-            <Button 
-              onClick={handleCancel}
-              className="hover:bg-[var(--gray-100)]"
-            >
-              Cancel
-            </Button>
-            <Button 
-              type="primary" 
+          {/* Footer actions */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 4 }}>
+            <Button onClick={handleCancel} size="middle">Cancel</Button>
+            <Button
+              type="primary"
               htmlType="submit"
-              loading={loading}
-              className="bg-[var(--primary-blue)] hover:bg-[var(--primary-dark)]"
+              loading={saving}
+              size="middle"
+              style={{ background: '#185FA5', borderColor: '#185FA5' }}
             >
               Save Changes
             </Button>
