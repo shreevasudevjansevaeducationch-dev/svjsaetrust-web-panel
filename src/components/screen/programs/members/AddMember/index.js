@@ -62,10 +62,12 @@ const AddMember = () => {
   const [aadhaarError, setAadhaarError] = useState(null);
   // Extra Dynamic Fields State
   const [extraFields, setExtraFields] = useState([]);
+  const [joinFeesPaymentType, setJoinFeesPaymentType] = useState(null);
+  const [customJoinFeesAmount, setCustomJoinFeesAmount] = useState(0);
 
   // Indian states and districts
   const [districts, setDistricts] = useState([]);
-
+  
   // New state for existing member selection
   const [existingMemberPhone, setExistingMemberPhone] = useState('');
   const [existingMemberList, setExistingMemberList] = useState([]);
@@ -101,6 +103,8 @@ const AddMember = () => {
       setSelectedExistingMember(null);
       setStoredBirthDate(null);
       setStoredJoinDate(dayjs());
+      setJoinFeesPaymentType(null);
+      setCustomJoinFeesAmount(1100);
       // Set default join date to today
       form.setFieldsValue({
         dateJoin: dayjs()
@@ -586,8 +590,15 @@ const AddMember = () => {
         locactionGroupId: selectedLocationGroup?.id || '',
         payAmount: payAmount,
         joinFees: joinFees,
-        joinFeesDone: values?.joinFeesDone || false,
-        joinFeesTxtId: values?.joinFeesTxtId || "",
+       joinFeesDone: values?.joinFeesDone || false,
+joinFeesTxtId: values?.joinFeesTxtId || "",
+joinFeesPaymentType: values?.joinFeesPaymentType || "",
+joinFeesPaidAmount: values?.joinFeesPaymentType === 'custom' 
+  ? (values?.customJoinFeesAmount || 0) 
+  : (values?.joinFeesPaymentType === 'full' ? joinFees : 0),
+joinFeesRemainingAmount: values?.joinFeesPaymentType === 'custom' && values?.customJoinFeesAmount 
+  ? (joinFees - values.customJoinFeesAmount) 
+  : (values?.joinFeesPaymentType === 'full' ? 0 : joinFees),
         role: 'member',
         addedBy: values.addedBy,
         addedByName: values.addedBy === 'agent' ? agentName : 'Admin',
@@ -728,7 +739,8 @@ const AddMember = () => {
             onFinish={onFinish}
             initialValues={{
               addedBy: 'admin',
-              dateJoin: dayjs()
+              dateJoin: dayjs(),
+              customJoinFeesAmount: 1100  // Add this line
             }}
             scrollToFirstError
             disabled={loading}
@@ -882,7 +894,7 @@ const AddMember = () => {
                     </Form.Item>
                   </Col>
                 </Row>
-
+  
                 <Row gutter={16}>
                   <Col span={8}>
                     <Form.Item
@@ -1360,38 +1372,147 @@ const AddMember = () => {
                   )}
                 </Row>
 
-                {/* Join Fees Section */}
-                <Divider orientation="left">नामांकन शुल्क</Divider>
-                <Card size="small">
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="joinFeesDone" valuePropName="checked">
-                        <Checkbox onChange={(e) => {
-                          setIsJoinFeesDone(e.target.checked)
-                        }}>Join Fees जमा हुआ?</Checkbox>
-                      </Form.Item>
-                    </Col>
-                    <Col span={16}>
-                      {isJoinFeesDone && (
-                        <Form.Item
-                          name="joinFeesTxtId"
-                          label="Join Fees Transaction ID"
-                          rules={[
-                            { required: true, message: 'कृपया Transaction ID दर्ज करें' },
-                          ]}
-                        >
-                          <Input
-                            size='large'
-                            htmlType='text'
-                            placeholder='Enter Join Fees Transaction ID'
-                            autoComplete='off'
-                            prefix={<IdcardOutlined />}
-                          />
-                        </Form.Item>
-                      )}
-                    </Col>
-                  </Row>
-                </Card>
+   {/* Join Fees Section */}
+<Divider orientation="left">नामांकन शुल्क</Divider>
+<Card size="small">
+  <Row gutter={16}>
+    <Col span={24}>
+      <Form.Item name="joinFeesDone" valuePropName="checked">
+        <Checkbox onChange={(e) => {
+          setIsJoinFeesDone(e.target.checked);
+          if (!e.target.checked) {
+            // Reset payment type and custom amount when unchecked
+            form.setFieldsValue({
+              joinFeesPaymentType: undefined,
+              customJoinFeesAmount: undefined
+            });
+            setJoinFeesPaymentType(null);
+            setCustomJoinFeesAmount(0);
+          }
+        }}>
+          Join Fees जमा हुआ?
+        </Checkbox>
+      </Form.Item>
+    </Col>
+  </Row>
+
+  {isJoinFeesDone && (
+    <>
+      <Row gutter={16}>
+        <Col span={12}>
+          <Form.Item
+            name="joinFeesPaymentType"
+            label="भुगतान प्रकार"
+            rules={[{ required: true, message: 'कृपया भुगतान प्रकार चुनें' }]}
+          >
+            <Select 
+              placeholder="भुगतान प्रकार चुनें"
+           onChange={(value) => {
+  setJoinFeesPaymentType(value);
+  if (value === 'full') {
+    // Set full amount when Full Paid is selected
+    setCustomJoinFeesAmount(joinFees);
+    form.setFieldsValue({
+      customJoinFeesAmount: joinFees
+    });
+  } else if (value === 'custom') {
+    // Set default amount 1100 when Custom is selected
+    setCustomJoinFeesAmount(1100);
+    form.setFieldsValue({
+      customJoinFeesAmount: 1100
+    });
+  }
+}}  
+            >
+              <Option value="full">Full Paid (₹{joinFees})</Option>
+              <Option value="custom">Custom Paid</Option>
+            </Select>
+          </Form.Item>
+        </Col>
+
+        <Col span={12}>
+          {joinFeesPaymentType === 'custom' && (
+            <Form.Item
+              name="customJoinFeesAmount"
+              label="भुगतान राशि"
+              rules={[
+                { required: true, message: 'कृपया भुगतान राशि दर्ज करें' },
+                {
+                  validator: (_, value) => {
+                    if (value && (value <= 0 || value > joinFees)) {
+                      return Promise.reject(new Error(`राशि ₹1 और ₹${joinFees} के बीच होनी चाहिए`));
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
+            >
+              <Input
+                size='large'
+                type='number'
+                prefix="₹"
+                placeholder={`₹1 - ₹${joinFees} दर्ज करें`}
+                onChange={(e) => {
+                  const amount = parseFloat(e.target.value);
+                  if (!isNaN(amount)) {
+                    setCustomJoinFeesAmount(amount);
+                  }
+                }}
+              />
+            </Form.Item>
+          )}
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={24}>
+          <Form.Item
+            name="joinFeesTxtId"
+            label="Join Fees Transaction ID"
+            rules={[
+              { required: true, message: 'कृपया Transaction ID दर्ज करें' },
+            ]}
+          >
+            <Input
+              size='large'
+              placeholder='Enter Join Fees Transaction ID'
+              autoComplete='off'
+              prefix={<IdcardOutlined />}
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      {/* Display payment summary */}
+      {(joinFeesPaymentType === 'full' || 
+        (joinFeesPaymentType === 'custom' && customJoinFeesAmount > 0)) && (
+        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded">
+          <Text strong>भुगतान सारांश:</Text>
+          <div className="mt-1">
+            <Text>कुल नामांकन शुल्क: ₹{joinFees}</Text>
+            <br />
+            <Text type="success">
+              भुगतान राशि: ₹
+              {joinFeesPaymentType === 'full' 
+                ? joinFees 
+                : customJoinFeesAmount || 0}
+            </Text>
+            {joinFeesPaymentType === 'custom' && 
+             customJoinFeesAmount > 0 && 
+             customJoinFeesAmount < joinFees && (
+              <>
+                <br />
+                <Text type="danger">
+                  बकाया राशि: ₹{joinFees - customJoinFeesAmount}
+                </Text>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )}
+</Card>
 
                 {/* Hidden field for age group ID */}
                 <Form.Item name="ageGroup" hidden>
