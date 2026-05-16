@@ -455,7 +455,9 @@ const CertificateComServerSide = ({data,selectedProgram}) => (
 
             {/* Right Side - Signature */}
             <View style={styles.rightFooter}>
-              <Text style={styles.footerValue}>{TrsutData.contactPerson} </Text>
+           <Text style={styles.footerValue}>
+ {TrsutData.trustPresident} / {TrsutData.contactPerson} 
+</Text>
               <Text style={styles.footerLabel}>निर्देशक</Text>
               {/* <Text style={styles.signatureText}>हस्ताक्षर</Text> */}
             </View>
