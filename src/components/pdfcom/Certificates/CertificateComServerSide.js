@@ -11,18 +11,8 @@ import {
 } from '@react-pdf/renderer';
 import NotoSansDevanagari from '@/app/api/helperfile/static/font/NotoSansDevanagari';
 import NotoSansDevanagariBold from '@/app/api/helperfile/static/font/NotoSansDevanagariBold';
-import logo from '@/app/api/helperfile/Images/logo';
-import krinshnaImage from '@/app/api/helperfile/Images/KrinshnaImage';
+
 import { TrsutData } from '@/lib/constentData';
-import semkariLogo from '@/app/api/helperfile/Images/semkariLogo';
-import { pdfColors } from '../../../lib/constentData';
-import NotoSansGujaratiRegular from '@/app/api/helperfile/static/font/NotoSansGujarati-Regular';
-import NotoSansGujaratiBold from '@/app/api/helperfile/static/font/NotoSansGujarati-Bold';
-import RobotoRegular from '@/app/api/helperfile/static/font/Roboto-Regular';
-import RobotoMedium from '@/app/api/helperfile/static/font/Roboto-Medium';
-import RobotoItalic from '@/app/api/helperfile/static/font/Roboto-Italic';
-import RobotoBold from '@/app/api/helperfile/static/font/Roboto-Bold';
-import certificateImg from '@/app/api/helperfile/Images/CertificateImg';
 
 
 // Register Devanagari Font
@@ -30,79 +20,37 @@ Font.register({
   family: 'NotoSansDevanagari',
   fonts: [
     {
-      src: NotoSansDevanagari,
+      src:NotoSansDevanagari ,
       fontWeight: 'normal',
     },
     {
-      src:NotoSansDevanagariBold,
+      src: NotoSansDevanagariBold,
       fontWeight: 'bold',
-    },
-  ],
+    }
+  ]
 });
 
-Font.register({
-  family: 'NotoSansGujarati',
-  fonts: [
-    {
-      src: NotoSansGujaratiRegular,
-      fontWeight: 'normal',
-    },
-    {
-      src: NotoSansGujaratiBold,
-      fontWeight: 'bold',
-    }
-  ]
-});
-Font.register({
-  family: 'Roboto',
-  fonts: [
-    {
-      src:RobotoRegular,
-      fontWeight: 'normal',
-    },
-    {
-      src: RobotoMedium,
-      fontWeight: 'medium',
-    },
-    {
-      src: RobotoItalic,
-      fontStyle: 'italic',
-    },
-    {
-      src: RobotoBold,
-      fontWeight: 'bold',
-    }
-  ]
-});
 const styles = StyleSheet.create({
   page: {
-    backgroundColor:pdfColors.bgColor,
-    fontFamily: 'NotoSansGujarati',
-    // padding: 12,
+    backgroundColor: '#ffffff',
+    fontFamily: 'NotoSansDevanagari',
     width: '210mm',
     height: '148mm',
     position: 'relative',
   },
-  backgroundImage: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '210mm',
-    height: '148mm',
-    zIndex: 0,
-  },
   outerBorder: {
-    // border: `4px solid ${pdfColors.borderColor}`,
+    // border: '4px solid #d4af37',
     // padding: 8,
     height: '100%',
+    width: '100%',
     position: 'relative',
     // borderRadius: 4,
   },
   innerBorder: {
-    // border: `2px solid ${pdfColors.borderColor}`,
-    padding: 20,
+    // border: '2px solid #d4af37',
+    padding: 28,
     height: '100%',
-    borderRadius: 2,
+    width: '100%',
     position: 'relative',
   },
   topText: {
@@ -112,27 +60,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   smallText: {
-    fontSize: 9,
-    color: pdfColors.headingColor,
+    fontSize: 10,
+    color: '#8B0000',
     fontWeight: 'bold',
     letterSpacing: 0.3,
   },
-  headerSection:{
+  headerSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
+    marginBottom: 8,
     paddingHorizontal: 4,
-    height: 100,
   },
-logoImage: {
-  width: 68,
-  height: 68,
-  borderRadius: 4,
-},
+  logoImage: {
+    width: 68,
+    height: 68,
+    borderRadius: 4,
+  },
   logoImage1: {
-    width: 90,
-    height: 70,
+    width: 78,
+    height: 68,
+    borderRadius: 4,
   },
   centerContent: {
     flex: 1,
@@ -140,10 +88,10 @@ logoImage: {
     paddingHorizontal: 16,
   },
   mainTitle: {
-    fontSize: 23,
-    color: pdfColors.headingColor,
+    fontSize: 26,
+    color: '#8B0000',
     fontWeight: 'bold',
-    marginBottom: 0,
+    marginBottom: 4,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
@@ -170,24 +118,24 @@ logoImage: {
     letterSpacing: 0.2,
   },
   schemeBox: {
-    position: 'absolute',
-    bottom: -12,
-    left: '50%',
-     transform: 'translateX(-50%)',
-    // width:300,
-    width:'50%'
+    backgroundColor: '#1a0f5e',
+    borderRadius: 14,
+    paddingVertical: 3,
+    paddingHorizontal: 14,
+    alignSelf: 'center',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    marginTop: 8,
   },
   schemeText: {
     fontSize: 11,
-    color: pdfColors.schemeColor,
+    color: '#fff',
     fontWeight: 'bold',
     letterSpacing: 0.4,
     marginTop: 2,
- 
   },
   formSection: {
-    marginTop: 9,
-    paddingHorizontal: 4,
+    marginTop: 5,
+    paddingHorizontal: 10,
   },
   row: {
     flexDirection: 'row',
@@ -196,16 +144,16 @@ logoImage: {
     flexWrap: 'wrap',
   },
   label: {
-    fontSize: 11,
-    color: pdfColors.infoLabelColor,
+    fontSize: 9.5,
+    color: '#000',
     marginRight: 4,
     fontWeight: 'normal',
   },
   value: {
-    fontSize: 11,
-    color: pdfColors.infoValueColor,
+    fontSize: 10,
+    color: '#000',
     fontWeight: 'bold',
-    borderBottom: '1px dotted ' + pdfColors.infoValueColor,
+    borderBottom: '1px dotted #000',
     paddingBottom: 2,
     paddingHorizontal: 5,
     minHeight: 16,
@@ -213,8 +161,8 @@ logoImage: {
   },
   memberIdBox: {
     position: 'absolute',
-    right: 18,
-    top: 135,
+    right: 40,
+    top: 150,
     border: '2px solid #333',
     width: 80,
     height: 80,
@@ -235,16 +183,18 @@ logoImage: {
     paddingTop: 10,
   },
   detailsSection: {
-    marginTop: 3,
+    marginTop: 6,
     fontFamily: 'NotoSansDevanagari',
-    fontSize: 9.5,
-    color:pdfColors.infoValueColor ,
+    fontSize: 8.5,
+    color: '#000',
     textAlign: 'justify',
-    fontWeight: 'bold',
-    position: 'absolute',
-    bottom:13,
-    textAlign: 'center',
-    width: '100%',
+    lineHeight: 1.4,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    
+    backgroundColor:'transparent',
+    borderRadius: 2,
+    // border: '0.5px solid #ddd',
   },
   footerSection: {
     flexDirection: 'row',
@@ -265,7 +215,7 @@ logoImage: {
     width: '45%',
   },
   footerLabel: {
-    fontSize: 9,
+    fontSize: 9.5,
     color: '#000',
     marginTop:5,
     fontWeight: 'bold',
@@ -280,6 +230,7 @@ logoImage: {
     minWidth: 140,
     textAlign: 'center',
     marginTop: 2,
+    marginLeft: 10,
   },
   signatureText: {
     fontSize: 10,
@@ -330,233 +281,189 @@ logoImage: {
     borderRadius: 3,
     marginLeft: 2,
   },
-  regCinText:{
-    fontSize: 7.8,
-    color: '#333',
-     fontWeight: 'bold',
-     letterSpacing: 0.2,
-      marginBottom: 3,
-  }
 });
-const detectLanguage = (text) => {
-  if (!text) return 'english';
-  
-  // Check for Gujarati script
-  const gujaratiRegex = /[\u0A80-\u0AFF]/;
-  // Check for Devanagari script (Hindi, Marathi, Sanskrit, etc.)
-  const devanagariRegex = /[\u0900-\u097F]/;
-  
-  if (gujaratiRegex.test(text)) {
-    return 'gujarati';
-  } else if (devanagariRegex.test(text)) {
-    return 'hindi';
-  } else {
-    return 'english';
-  }
-};
 
-// Helper function to get appropriate font family based on language
-const getFontFamily = (text) => {
-  const language = detectLanguage(text);
-  
-  switch (language) {
-    case 'hindi':
-      return 'NotoSansDevanagari';
-    case 'gujarati':
-      return 'NotoSansGujarati';
-    case 'english':
-    default:
-      return 'Roboto';
-  }
-};
-
-const DynamicText = ({ children, style = {}, ...props }) => {
-  const fontFamily = getFontFamily(children);
-
-  return (
-    <Text
-      style={[style, { fontFamily }]}   // ✅ correct way
-      {...props}
-    >
-      {children}
-    </Text>
-  );
-};
-
-const CertificateServerSide = ({data,selectedProgram,fontPath}) => (
+const CertificateComServerSide = ({data,selectedProgram}) => (
   <Document>
     <Page size={{ width: '210mm', height: '148mm' }} style={styles.page}>
-      <View style={styles.outerBorder}>
-      <Image src={certificateImg} style={styles.backgroundImage} /> 
+   
+        <View style={styles.outerBorder}>
+           <Image src={TrsutData.frameImg}style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '210mm',
+      height: '148mm',
+      zIndex: -1,
+    }} />
         {/* <Text style={styles.serialNumber}>{data?.registrationNumber}</Text> */}
         <View style={styles.innerBorder}>
           {/* Top Text */}
-    
+  
 
           {/* Watermark */}
           <Image 
-           src={TrsutData.logo}
+           src={"/Images/logovjss.jpeg"}
             style={styles.watermark}
           />
 
           {/* Header Section */}
-      <View style={styles.headerSection}>
-  
-  {/* Left Logo — always show main logo as fallback */}
-  {/* <Image 
-    src={TrsutData.RightLogo || TrsutData.logo}
-    style={styles.logoImage1}
-  /> */}
+          {/* <View style={styles.headerSection}>
+            
+         
+            
+            <View style={styles.centerContent}>
+              <Text style={styles.mainTitle}>श्री साँवलाजी सेवा संस्थान</Text>
+              <Text style={styles.subTitle}>अहमदाबाद-गुजरात</Text>
+              <Text style={styles.address}>
+                20/2, शिवम् फ्लेट, आनंद फ्लेट पुलिस चौकी के पास, बापूनगर, अहमदाबाद
+              </Text>
+              <Text style={styles.phoneNumbers}>
+                9723878021 / 8511878021 / 9408323975
+              </Text>
+              <View style={styles.schemeBox}>
+                <Text style={styles.schemeText}>{selectedProgram?.hiname}</Text>
+              </View>
+            </View>
 
-  {/* Center Content */}
-  {/* <View style={styles.centerContent}>
-    <Text style={styles.mainTitle}>{TrsutData.name}</Text>
-    {TrsutData.cityState && (
-      <Text style={styles.subTitle}>{TrsutData.cityState}</Text>
-    )}
-    {TrsutData.regNo && (
-      <Text style={styles.regCinText}>{TrsutData.regNo}</Text>
-    )}
-    {TrsutData.address && (
-      <Text style={styles.address}>{TrsutData.address}</Text>
-    )}
-    {TrsutData.contact && (
-      <Text style={styles.address}>{TrsutData.contact}</Text>
-    )}
-    <View style={styles.schemeBox}>
-      <Text style={styles.schemeText}>{selectedProgram?.hiname}</Text>
-    </View>
-  </View> */}
+        
+          </View> */}
+       <View style={{
+        height:80,
+        width:'100%',
+       }}>
 
-  {/* Right Logo — show main logo, or blank placeholder if none */}
-  {/* {TrsutData.RightLogo ? (
-    <Image src={TrsutData.logo} style={styles.logoImage} />
-  ) : (
-    <View style={styles.logoImage} />
-  )} */}
-    <View style={styles.schemeBox}>
-      <DynamicText style={styles.schemeText}>{
-       selectedProgram.guname || selectedProgram?.hiname 
-        }</DynamicText>
-    </View>
-
-</View>
-
+       </View>
           {/* Member ID Box */}
           <View style={styles.memberIdBox}>
             {data?.photoURL ? (
               <Image src={data.photoURL} style={styles.photoImage} />
             ) : (
               <View>
-                <Text style={styles.memberIdLabel}>Member Photo</Text>
+                <Text style={styles.memberIdLabel}>सदस्य फोटो</Text>
               </View>
             )}
           </View>
-
+         <View style={styles.schemeBox}>
+                <Text style={styles.schemeText}>{selectedProgram?.hiname}</Text>
+              </View>
           {/* Form Section */}
-       <View style={styles.formSection}>
-  {/* Row 1 */}
-  <View style={[styles.row,{
-    justifyContent:'space-between',
-    marginRight:55
-  }]}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>સભ્યતા ક્રમાંક:</Text>
-      
-      <Text style={[styles.value, { minWidth: 90 }]}>{data?.registrationNumber || '---'}</Text>
-    </View>
-    <View style={[styles.fieldGroup, { marginLeft: 20,marginRight:40 }]}>
-      <Text style={styles.label}>તારીખ:</Text>
-      <Text style={[styles.value, { minWidth: 60 }]}>{data?.dateJoin || '---'}</Text>
-    </View>
-  </View>
+          <View style={styles.formSection}>
+            {/* Row 1 */}
+            <View style={[styles.row,{
+              justifyContent:'space-between',
+              marginRight:55
+            }]}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>सदस्यता क्रमांक:</Text>
+                <Text style={[styles.value, { minWidth: 90 }]}>{data?.registrationNumber || '---'}</Text>
+              </View>
+              <View style={[styles.fieldGroup, { marginLeft: 20,marginRight:40 }]}>
+                <Text style={styles.label}>दिनांक:</Text>
+                <Text style={[styles.value, { minWidth: 60 }]}>{data?.dateJoin || '---'}</Text>
+              </View>
+            </View>
 
-  {/* Row 2 */}
-  <View style={styles.row}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>નામ:</Text>
-      
-      <DynamicText style={[styles.value, { minWidth: 175 }]}>{data?.displayName || '---'}</DynamicText>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>પિતા/પતિનું નામ:</Text>
-      <DynamicText style={[styles.value, { minWidth: 175 }]}>{data?.fatherName || '---'}</DynamicText>
-    </View>
-  </View>
+            {/* Row 2 */}
+            <View style={styles.row}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>नाम:</Text>
+                <Text style={[styles.value, { minWidth: 150 }]}>{data?.displayName || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>पिता/पति का नाम:</Text>
+                <Text style={[styles.value, { minWidth: 150 }]}>{data?.fatherName || '---'}</Text>
+              </View>
+            </View>
 
-  {/* Row 4 */}
-  <View style={styles.row}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>મોબાઇલ નંબર:</Text>
-      <Text style={[styles.value, { minWidth: 165 }]}>{data?.phone || '---'}</Text>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>જન્મ તારીખ:</Text>
-      <Text style={[styles.value, { minWidth: 160 }]}>{data?.bobDate || '---'}</Text>
-    </View>
-  </View>
+            {/* Row 3 */}
+            <View style={styles.row}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>गोत्र:</Text>
+                <Text style={[styles.value, { minWidth: 90 }]}>{data?.gotra || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>जाति:</Text>
+                <Text style={[styles.value, { minWidth:100}]}>{data?.jati || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>जन्म दि.:</Text>
+                <Text style={[styles.value, { minWidth: 110 }]}>{data?.bobDate || '---'}</Text>
+              </View>
+            </View>
 
-  <View style={styles.row}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>ગામ/શહેરનું નામ:</Text>
-      <DynamicText style={[styles.value, { minWidth: 90 }]}>{data?.village || '---'}</DynamicText>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>જિલ્લો:</Text>
-      <DynamicText style={[styles.value, { minWidth:100}]}>{data?.district || '---'}</DynamicText>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>રાજ્ય:</Text>
-      <DynamicText style={[styles.value, { minWidth: 105 }]}>{data?.state || '---'}</DynamicText>
-    </View>
-  </View>
-    <View style={styles.row}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>એજન્ટનું નામ:</Text>
-      <Text style={[styles.value, { minWidth: 170 }]}>{data?.addedByName || '---'}</Text>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>એજન્ટનુ મો.:</Text>
-      <Text style={[styles.value, { minWidth: 160 }]}>{data?.agentPhone || '---'}</Text>
-    </View>
-  </View>
+            {/* Row 4 */}
+            <View style={styles.row}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>मोबाईल नंबर:</Text>
+                <Text style={[styles.value, { minWidth: 140 }]}>{data?.phone || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>गाँव/शहर का नाम:</Text>
+                <Text style={[styles.value, { minWidth: 135 }]}>{data?.village || '---'}</Text>
+              </View>
+            </View>
 
-  {/* Row 6 */}
-  <View style={styles.row}>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>વારસદાર:</Text>
-      <DynamicText style={[styles.value, { minWidth: 160 }]}>{data?.guardian  || '---'}</DynamicText>
-    </View>
-    <View style={styles.fieldGroup}>
-      <Text style={styles.label}>
-        દરેક {selectedProgram?.isSuraksha ? 'મૃત્યુ' : selectedProgram?.isMamera ? "માયરો" : 'લગ્ન'} પર સહાય રકમ:
-      </Text>
-      <Text style={[styles.value, { minWidth: 70}]}>
-        {data?.payAmount || '0'}/-
-      </Text>
-      <Text style={styles.label}>રૂપીયા</Text>
-    </View>
-  </View>
-</View>
+            {/* Row 5 */}
+            <View style={styles.row}>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>जिला:</Text>
+                <Text style={[styles.value, { minWidth: 160 }]}>{data?.district || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>राज्य:</Text>
+                <Text style={[styles.value, { minWidth: 180 }]}>{data?.state || '---'}</Text>
+              </View>
+            </View>
+
+            {/* Row 6 */}
+            <View style={styles.row}>
+                  <View style={styles.fieldGroup}>
+                <Text style={styles.label}>वारिसदार:</Text>
+                <Text style={[styles.value, { minWidth: 160 }]}>{data?.guardian  || '---'}</Text>
+              </View>
+              <View style={styles.fieldGroup}>
+                <Text style={styles.label}>प्रत्येक {selectedProgram?.isSuraksha?'देहांत':selectedProgram?.isMamera?"मायरा":'विवाह'} पर सहयोग राशि:</Text>
+                <Text style={[styles.value, { minWidth: 70}]}>
+                  {data?.payAmount || '0'}/-
+                </Text>
+                <Text style={styles.label}>रुपये</Text>
+              </View>
+            </View>
+          </View>
 
           {/* Details Section */}
           {
             selectedProgram?.noteLine && <View style={styles.detailsSection}>
-            <DynamicText style={{
-
+            <Text style={{
+              color:'#8B0000',
+              fontWeight:'bold',
             }}>
              {selectedProgram?.noteLine}
-            </DynamicText>
+            </Text>
           </View>
           }
        
 
           {/* Footer Section */}
-      
-        </View>
+          <View style={styles.footerSection}>
+            {/* Left Side - Karyakarta */}
+            <View style={styles.leftFooter}>
+              <Text style={styles.footerValue}>{data?.addedByName || '---'} ({data.agentPhone})</Text>
+              <Text style={styles.footerLabel}>प्रतिनिधि </Text>
+            </View>
+
+            {/* Right Side - Signature */}
+            <View style={styles.rightFooter}>
+              <Text style={styles.footerValue}>{TrsutData.contactPerson} </Text>
+              <Text style={styles.footerLabel}>निर्देशक</Text>
+              {/* <Text style={styles.signatureText}>हस्ताक्षर</Text> */}
+            </View>
+          </View>
+        </View> 
       </View>
     </Page>
   </Document>
 );
 
-export default CertificateServerSide;
+export default CertificateComServerSide;
