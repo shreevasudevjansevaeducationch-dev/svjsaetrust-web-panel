@@ -131,7 +131,7 @@ const RequestSection = () => {
       (request.aadhaarNo && request.aadhaarNo.includes(term)) ||
       (request.fatherName && request.fatherName.toLowerCase().includes(term)) ||
       (request.phone && request.phone.includes(term)) ||
-      (request.programName && request.programName.toLowerCase().includes(term))
+      (request.programName && request.programName.toLowerCase().includes(term)) || (request.addedByName && request.addedByName.toLowerCase().includes(term))
     );
   }, [requests, searchTerm]);
 
@@ -492,6 +492,12 @@ ${values.joinFeesDone ? `Join Fees: ₹${joinFeesPaidAmount}` : 'Join Fees: Pend
               <div className="flex items-center">
                 <DollarOutlined className="mr-2 text-green-500 flex-shrink-0" />
                 <span className="text-gray-700 truncate">Join Fees: ₹{member.joinFees}</span>
+              </div>
+            )}
+                      {member.addedByName  && (
+              <div className="flex items-center">
+                <DollarOutlined className="mr-2 text-green-500 flex-shrink-0" />
+                <span className="text-gray-700 truncate">Agent: {member.addedByName}</span>
               </div>
             )}
           </div>
