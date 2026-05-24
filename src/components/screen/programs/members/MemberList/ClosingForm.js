@@ -838,7 +838,7 @@ const ClosingForm = ({ open, onClose, memberData, user, selectedProgram, onSucce
                   format="DD-MM-YYYY"
                   style={{ width: '100%' }}
                   placeholder="Select Closing date"
-                  disabledDate={disableMarriageDate}
+                
                 />
               </Form.Item>
 
