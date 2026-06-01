@@ -32,6 +32,7 @@ import isBetween from 'dayjs/plugin/isBetween';
 import { fetchSingleMemberMarriageReport } from '@/lib/helper';
 import MemberPaymentDetails from './MemberPaymentDetails';
 import MemberExportPDF from './MemberExportPDF';
+import JoinFeesMemberList from './JoinFeesCom/JoinFeesMemberList';
 
 dayjs.extend(isBetween);
 
@@ -126,6 +127,8 @@ const MemberList = () => {
     const [draftAgent,           setDraftAgent]           = useState(null);
     const [draftDateRange,       setDraftDateRange]       = useState(null);
     const [draftJoinFees,        setDraftJoinFees]        = useState('all');
+
+    const [JoinFeesMemberListOpen, setJoinFeesMemberListOpen] = useState(false);
 
     const dispatch           = useDispatch();
     const memberStatusChange = useSelector(s => s.data.getMemberDataChange);
@@ -335,7 +338,7 @@ const MemberList = () => {
                 return <Tag color={g === 'male' ? 'blue' : g === 'female' ? 'pink' : 'default'} className="capitalize">{g}</Tag>;
             }
         },
-        { field: 'state',       headerName: 'State',      width: 100, cellDataType: 'text' },
+        { field: 'village',       headerName: 'Village',      width: 100, cellDataType: 'text' },
         { field: 'addedByName', headerName: 'Created By', cellRenderer: ({ data }) => <div>{data.addedByName}</div> },
         { field: 'aadhaarNo',   headerName: 'Aadhaar No', cellDataType: 'text' },
         {
@@ -437,7 +440,7 @@ const MemberList = () => {
             }
         },
     ];
-
+console.log()
     // ── render ─────────────────────────────────────────────────────────────────
     return (
         <div>
@@ -501,6 +504,12 @@ const MemberList = () => {
                     <Tag color="blue" className="text-sm font-medium h-7 flex items-center m-0">
                         {filteredMembersData.length} members
                     </Tag>
+                    <Button 
+                        className="flex items-center gap-1.5 h-9 px-4 rounded-lg bg-red-50 border-red-300 text-red-600 hover:bg-red-100 hover:border-red-400 font-medium"
+                    onClick={() => setJoinFeesMemberListOpen(true)}
+                    >
+                        Join Fees List
+                    </Button>
                     <Button
                         icon={<FilePdfOutlined />}
                         onClick={() => setIsExportOpen(true)}
@@ -703,6 +712,10 @@ const MemberList = () => {
                 filterSummary={filterSummary}
                 programName={selectedProgram?.name || ''}
             />
+            {
+                JoinFeesMemberListOpen &&   <JoinFeesMemberList selectedProgram={selectedProgram} agentData={agentsList?.find(a => a.id === draftAgent)} membersData={filteredMembersData} open={JoinFeesMemberListOpen} onClose={() => setJoinFeesMemberListOpen(false)} />
+            }
+          
 
             {/* ── member modals ─────────────────────────────────────────────── */}
             <MemberDetailsView
