@@ -17,12 +17,19 @@ import dayjs from 'dayjs'
 import PaymentModal from './PaymentModal'
 import { createData, updateData, getData } from '@/lib/services/firebaseService'
 import TransactionHistoryDrawer from './TransactionHistoryDrawer'
-import JoinFeesExportPDF from './JoinFeesExportPDF' // New component for join fees export
+import JoinFeesExportPDF from './JoinFeesExportPDF'
 import { pdfColors, TrsutData } from '@/lib/constentData'
 
 const { Option } = Select
 const { TextArea } = Input
 const { Text } = Typography
+
+// ─── Helper function to safely convert to number ───────────────────────────
+const toNumber = (value) => {
+    if (value === null || value === undefined || value === '') return 0
+    const num = Number(value)
+    return isNaN(num) ? 0 : num
+}
 
 // ─── colour tokens ───────────────────────────────────────────────────────────
 const C = {
@@ -33,16 +40,38 @@ const C = {
     gray:   { bg: '#f9fafb', border: '#e5e7eb', text: '#374151', badge: '#f3f4f6' },
 }
 
-// ─── tiny helpers ────────────────────────────────────────────────────────────
-const fmt   = (v) => `₹${Number(v || 0).toLocaleString('en-IN')}`
-const pct   = (paid, total) => total ? Math.round((paid / total) * 100) : 0
-const isFullyPaid    = (m) => (m?.joinFeesPaidAmount || 0) >= (m?.joinFees || 0)
-const getRemaining   = (m) => Math.max(0, (m?.joinFees || 0) - (m?.joinFeesPaidAmount || 0))
-const initials       = (name = '') => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-const avatarColor    = (name = '') => {
+// ─── Format number as currency ──────────────────────────────────────────────
+const fmt = (v) => `₹${toNumber(v).toLocaleString('en-IN')}`
+
+// ─── Calculate percentage ───────────────────────────────────────────────────
+const pct = (paid, total) => {
+    const paidNum = toNumber(paid)
+    const totalNum = toNumber(total)
+    return totalNum ? Math.round((paidNum / totalNum) * 100) : 0
+}
+
+// ─── Check if fully paid ────────────────────────────────────────────────────
+const isFullyPaid = (m) => toNumber(m?.joinFeesPaidAmount) >= toNumber(m?.joinFees)
+
+// ─── Get remaining amount ───────────────────────────────────────────────────
+const getRemaining = (m) => Math.max(0, toNumber(m?.joinFees) - toNumber(m?.joinFeesPaidAmount))
+
+// ─── Get initials from name ─────────────────────────────────────────────────
+const initials = (name = '') => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
+// ─── Get avatar color based on name ─────────────────────────────────────────
+const avatarColor = (name = '') => {
     const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444']
     return colors[name.charCodeAt(0) % colors.length]
 }
+
+// ─── Normalize member data (convert string amounts to numbers) ──────────────
+const normalizeMember = (member) => ({
+    ...member,
+    joinFees: toNumber(member?.joinFees),
+    joinFeesPaidAmount: toNumber(member?.joinFeesPaidAmount),
+    joinFeesRemainingAmount: toNumber(member?.joinFeesRemainingAmount)
+})
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
@@ -98,11 +127,17 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
     const [selectedMemberForHistory, setSelectedMemberForHistory] = useState(null)
     const [pdfExportOpen, setPdfExportOpen] = useState(false)
     const { user }                              = useAuth()
-    const {message}=App.useApp()
+    const { message } = App.useApp()
+
+    // ── Normalize members data (convert strings to numbers) ──────────────────
+    const normalizedMembersData = useMemo(() => {
+        if (!membersData) return []
+        return membersData.map(normalizeMember)
+    }, [membersData])
 
     // ── derived data ──────────────────────────────────────────────────────────
     const filteredMembers = useMemo(() => {
-        let list = membersData || []
+        let list = normalizedMembersData || []
         if (filterStatus === 'paid')    list = list.filter(isFullyPaid)
         if (filterStatus === 'pending') list = list.filter(m => !isFullyPaid(m))
         if (searchText.trim()) {
@@ -116,7 +151,7 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
             )
         }
         return list
-    }, [membersData, searchText, filterStatus])
+    }, [normalizedMembersData, searchText, filterStatus])
 
     const selectedMembers = useMemo(
         () => selectedRowKeys.map(k => filteredMembers[k]).filter(Boolean),
@@ -132,8 +167,8 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
         if (!filteredMembers.length)
             return { totalMembers: 0, totalFees: 0, totalPaid: 0, totalRemaining: 0, paidCount: 0, pendingCount: 0 }
         return filteredMembers.reduce((acc, m) => {
-            acc.totalFees      += m?.joinFees || 0
-            acc.totalPaid      += m?.joinFeesPaidAmount || 0
+            acc.totalFees      += toNumber(m?.joinFees)
+            acc.totalPaid      += toNumber(m?.joinFeesPaidAmount)
             acc.totalRemaining += getRemaining(m)
             if (isFullyPaid(m)) acc.paidCount++; else acc.pendingCount++
             acc.totalMembers++
@@ -142,10 +177,10 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
     }, [filteredMembers])
 
     const originalTotals = useMemo(() => {
-        if (!membersData?.length) return { paidCount: 0, pendingCount: 0, total: 0 }
-        const pc = membersData.filter(isFullyPaid).length
-        return { paidCount: pc, pendingCount: membersData.length - pc, total: membersData.length }
-    }, [membersData])
+        if (!normalizedMembersData?.length) return { paidCount: 0, pendingCount: 0, total: 0 }
+        const pc = normalizedMembersData.filter(isFullyPaid).length
+        return { paidCount: pc, pendingCount: normalizedMembersData.length - pc, total: normalizedMembersData.length }
+    }, [normalizedMembersData])
 
     // ── handlers ──────────────────────────────────────────────────────────────
     const handleSelectAll = () =>
@@ -158,10 +193,8 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
         if (!data.length) { message.warning('No members to export'); return }
         
         if (type === 'pdf') {
-            // Open PDF export modal
             setPdfExportOpen(true)
         } else if (type === 'csv') {
-            // CSV export logic
             exportToCSV(data)
         }
     }
@@ -177,8 +210,8 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
                 member.fatherName || '',
                 member.village || '',
                 member.phone || '',
-                member.joinFees || 0,
-                member.joinFeesPaidAmount || 0,
+                toNumber(member.joinFees),
+                toNumber(member.joinFeesPaidAmount),
                 getRemaining(member),
                 isFullyPaid(member) ? 'Paid' : 'Pending'
             ])
@@ -222,11 +255,13 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
      
             for (let idx = 0; idx < selectedMembers.length; idx++) {
                 const member = selectedMembers[idx]
-                const pay    = Number(allocations[idx]) || 0
+                const pay = toNumber(allocations[idx])
                 if (pay <= 0) continue
      
-                const newPaid  = (member.joinFeesPaidAmount || 0) + pay
-                const fullPaid = newPaid >= (member.joinFees || 0)
+                const currentPaid = toNumber(member.joinFeesPaidAmount)
+                const totalFees = toNumber(member.joinFees)
+                const newPaid = currentPaid + pay
+                const fullPaid = newPaid >= totalFees
      
                 await createData(
                     `/users/${user.uid}/programs/${selectedProgram.id}/joinFeesTransactions`,
@@ -250,7 +285,7 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
                     member.id,
                     {
                         joinFeesPaidAmount:    newPaid,
-                        joinFeesRemainingAmount: (member.joinFees || 0) - newPaid,
+                        joinFeesRemainingAmount: totalFees - newPaid,
                         joinFeesDone:          fullPaid,
                         joinFeesTxtId:         values.transactionId || member.joinFeesTxtId || null,
                         joinFeesPaymentType:   values.paymentMode === 'cash' ? 'cash' : 'online',
@@ -259,7 +294,7 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
                 )
             }
      
-            const totalPaid = Object.values(allocations).reduce((s, v) => s + (Number(v) || 0), 0)
+            const totalPaid = Object.values(allocations).reduce((s, v) => s + toNumber(v), 0)
             message.success(`Payment of ${fmt(totalPaid)} recorded for ${selectedMembers.length} member(s)`)
             setPaymentModalOpen(false)
             setSelectedRowKeys([])
@@ -335,11 +370,11 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
         },
         {
             title: 'Join fees', dataIndex: 'joinFees', key: 'fees', width: 90, align: 'right',
-            render: v => <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{fmt(v)}</span>,
+            render: (v, record) => <span style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{fmt(record.joinFees)}</span>,
         },
         {
             title: 'Paid', dataIndex: 'joinFeesPaidAmount', key: 'paid', width: 85, align: 'right',
-            render: v => <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>{fmt(v)}</span>,
+            render: (v, record) => <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>{fmt(record.joinFeesPaidAmount)}</span>,
         },
         {
             title: 'Remaining', key: 'remaining', width: 90, align: 'right',
@@ -351,7 +386,7 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
         {
             title: 'Progress', key: 'progress', width: 110,
             render: (_, r) => {
-                const p = pct(r.joinFeesPaidAmount || 0, r.joinFees || 0)
+                const p = pct(r.joinFeesPaidAmount, r.joinFees)
                 return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <div style={{ flex: 1, height: 5, borderRadius: 99, background: '#e5e7eb', overflow: 'hidden' }}>
@@ -499,9 +534,9 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
                         allowClear
                         style={{ flex: 1, maxWidth: 360, borderRadius: 7 }}
                     />
-                    {filteredMembers.length !== (membersData?.length || 0) && (
+                    {filteredMembers.length !== (normalizedMembersData?.length || 0) && (
                         <span style={{ fontSize: 12, color: '#6b7280' }}>
-                            Showing {filteredMembers.length} of {membersData?.length || 0}
+                            Showing {filteredMembers.length} of {normalizedMembersData?.length || 0}
                         </span>
                     )}
                 </div>
@@ -545,15 +580,10 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
                         pagination={{ pageSize: 25, size: 'small', showTotal: (t, [s, e]) => `${s}–${e} of ${t} members`, showSizeChanger: false }}
                         rowClassName={r => isFullyPaid(r) ? 'row-paid' : 'row-pending'}
                         style={{ background: '#fff' }}
-                        components={{
-                            table: (props) => (
-                                <table {...props} style={{ ...props.style }} />
-                            ),
-                        }}
                         summary={(pageData) => {
                             if (!pageData.length) return null
-                            const fees = pageData.reduce((a, r) => a + (r.joinFees || 0), 0)
-                            const paid = pageData.reduce((a, r) => a + (r.joinFeesPaidAmount || 0), 0)
+                            const fees = pageData.reduce((a, r) => a + toNumber(r.joinFees), 0)
+                            const paid = pageData.reduce((a, r) => a + toNumber(r.joinFeesPaidAmount), 0)
                             const rem  = pageData.reduce((a, r) => a + getRemaining(r), 0)
                             return (
                                 <Table.Summary fixed>

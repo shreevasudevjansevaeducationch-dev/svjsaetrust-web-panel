@@ -11,10 +11,27 @@ import { PrinterOutlined, CloseOutlined, FilePdfOutlined } from '@ant-design/ico
 import dayjs from 'dayjs';
 import { pdfColors, TrsutData } from '@/lib/constentData';
 
+// ── Safe number conversion helper ─────────────────────────────────────────────
+const toNumber = (value) => {
+    if (value === null || value === undefined || value === '') return 0;
+    const num = Number(value);
+    return isNaN(num) ? 0 : num;
+};
+
 // ── helpers ───────────────────────────────────────────────────────────────────
-const fmt = (v) => `₹${Number(v || 0).toLocaleString('en-IN')}`;
-const isFullyPaid = (m) => (m?.joinFeesPaidAmount || 0) >= (m?.joinFees || 0);
-const getRemaining = (m) => Math.max(0, (m?.joinFees || 0) - (m?.joinFeesPaidAmount || 0));
+const fmt = (v) => `₹${toNumber(v).toLocaleString('en-IN')}`;
+
+const isFullyPaid = (m) => {
+    const paid = toNumber(m?.joinFeesPaidAmount);
+    const total = toNumber(m?.joinFees);
+    return paid >= total;
+};
+
+const getRemaining = (m) => {
+    const paid = toNumber(m?.joinFeesPaidAmount);
+    const total = toNumber(m?.joinFees);
+    return Math.max(0, total - paid);
+};
 
 // ── badge helpers (inline HTML strings) ───────────────────────────────────────
 const feesBadge = (member) => {
@@ -30,17 +47,33 @@ const feesBadge = (member) => {
 const buildPrintHTML = ({ members, filterSummary, programName, agentData, totals, trustData, colors }) => {
     const now = dayjs().format('DD/MM/YYYY hh:mm A');
     const total = members.length;
-    const paidCount = members.filter(m => isFullyPaid(m)).length;
+    
+    // Normalize all members data first
+    const normalizedMembers = members.map(m => ({
+        ...m,
+        joinFees: toNumber(m?.joinFees),
+        joinFeesPaidAmount: toNumber(m?.joinFeesPaidAmount),
+        joinFeesRemainingAmount: toNumber(m?.joinFeesRemainingAmount)
+    }));
+    
+    const paidCount = normalizedMembers.filter(m => isFullyPaid(m)).length;
     const pendingCount = total - paidCount;
-    const totalFees = totals.totalFees || members.reduce((sum, m) => sum + (m.joinFees || 0), 0);
-    const totalPaid = totals.totalPaid || members.reduce((sum, m) => sum + (m.joinFeesPaidAmount || 0), 0);
-    const totalRemaining = totals.totalRemaining || members.reduce((sum, m) => sum + getRemaining(m), 0);
+    
+    // Calculate totals with proper number conversion
+    const totalFees = totals.totalFees || normalizedMembers.reduce((sum, m) => sum + toNumber(m.joinFees), 0);
+    const totalPaid = totals.totalPaid || normalizedMembers.reduce((sum, m) => sum + toNumber(m.joinFeesPaidAmount), 0);
+    const totalRemaining = totals.totalRemaining || normalizedMembers.reduce((sum, m) => sum + getRemaining(m), 0);
     const collectionPct = totalFees ? Math.round((totalPaid / totalFees) * 100) : 0;
 
     // resolve logo
     const rightLogoSrc = typeof trustData.RightLogo === 'string' ? trustData.RightLogo : '';
 
-    const rows = members.map((m, i) => `
+    const rows = normalizedMembers.map((m, i) => {
+        const joinFees = toNumber(m.joinFees);
+        const joinFeesPaidAmount = toNumber(m.joinFeesPaidAmount);
+        const remaining = getRemaining(m);
+        
+        return `
         <tr class="${i % 2 === 1 ? 'alt-row' : ''}">
             <td class="td-center td-num">${i + 1}</td>
             <td class="td-name">
@@ -50,12 +83,12 @@ const buildPrintHTML = ({ members, filterSummary, programName, agentData, totals
             <td class="td">${m.fatherName || '—'}</td>
             <td class="td">${m.village || '—'}</td>
             <td class="td">${m.phone || '—'}</td>
-            <td class="td-center td-number">${fmt(m.joinFees || 0)}</td>
-            <td class="td-center td-number" style="color:#16a34a;font-weight:600;">${fmt(m.joinFeesPaidAmount || 0)}</td>
-            <td class="td-center td-number" style="color:#dc2626;font-weight:600;">${fmt(getRemaining(m))}</td>
+            <td class="td-center td-number">${fmt(joinFees)}</td>
+            <td class="td-center td-number" style="color:#16a34a;font-weight:600;">${fmt(joinFeesPaidAmount)}</td>
+            <td class="td-center td-number" style="color:#dc2626;font-weight:600;">${fmt(remaining)}</td>
             <td class="td-center">${feesBadge(m)}</td>
         </tr>
-    `).join('');
+    `}).join('');
 
     const filterPills = filterSummary
         ? filterSummary.split(' · ').map(f => `<span class="f-pill">${f}</span>`).join('')
@@ -570,7 +603,7 @@ const JoinFeesExportPDF = ({
     };
 
     const total = members.length;
-    const pendingCount = members.filter(m => !m?.joinFeesDone).length;
+    const pendingCount = members.filter(m => !isFullyPaid(m)).length;
 
     return (
         <Modal
