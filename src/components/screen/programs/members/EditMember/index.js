@@ -13,7 +13,8 @@ import {
   TagOutlined,
   LoadingOutlined,
   PlusOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  TagsOutlined
 } from '@ant-design/icons';
 import ImgCrop from 'antd-img-crop';
 import dayjs from 'dayjs';
@@ -1192,7 +1193,7 @@ console.log(values,'values')
                 <Row gutter={16} key={index} className="mb-2">
                   <Col span={8}>
                     <Input
-                      prefix={<TagOutlined />}
+                      prefix={<TagsOutlined />}
                       placeholder="लेबल (उदाहरण: व्यवसाय)"
                       value={field.label}
                       onChange={(e) => handleExtraFieldChange(index, 'label', e.target.value)}

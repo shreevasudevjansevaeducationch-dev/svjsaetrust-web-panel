@@ -115,7 +115,7 @@ const MemberAvatar = ({ name, size = 28 }) => (
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedProgram }) => {
+const JoinFeesMemberList = ({ onSuccess,open, onClose, membersData, agentData, selectedProgram }) => {
     const [selectedRowKeys, setSelectedRowKeys] = useState([])
     const [loading, setLoading]                 = useState(false)
     const [searchText, setSearchText]           = useState('')
@@ -295,9 +295,11 @@ const JoinFeesMemberList = ({ open, onClose, membersData, agentData, selectedPro
             }
      
             const totalPaid = Object.values(allocations).reduce((s, v) => s + toNumber(v), 0)
+            onSuccess && onSuccess()
             message.success(`Payment of ${fmt(totalPaid)} recorded for ${selectedMembers.length} member(s)`)
             setPaymentModalOpen(false)
             setSelectedRowKeys([])
+            onClose()
             window.dispatchEvent(new Event('memberDataUpdate'))
         } catch (err) {
             console.error(err)

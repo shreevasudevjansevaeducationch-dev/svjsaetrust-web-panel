@@ -713,7 +713,7 @@ console.log()
                 programName={selectedProgram?.name || ''}
             />
             {
-                JoinFeesMemberListOpen &&   <JoinFeesMemberList selectedProgram={selectedProgram} agentData={agentsList?.find(a => a.id === draftAgent)} membersData={filteredMembersData} open={JoinFeesMemberListOpen} onClose={() => setJoinFeesMemberListOpen(false)} />
+                JoinFeesMemberListOpen &&   <JoinFeesMemberList onSuccess={onGridReady} selectedProgram={selectedProgram} agentData={agentsList?.find(a => a.id === draftAgent)} membersData={filteredMembersData} open={JoinFeesMemberListOpen} onClose={() => setJoinFeesMemberListOpen(false)} />
             }
           
 
