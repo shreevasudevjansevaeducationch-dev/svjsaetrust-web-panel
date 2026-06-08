@@ -33,6 +33,9 @@ import {
   FiUser, FiCalendar, FiMessageSquare, FiImage, FiPlus,
   FiAlertTriangle
 } from 'react-icons/fi';
+import GenerateRasidEntry from './ClosingMember/GenerateRasidEntry';
+import DeleteUnlinkedPayments from './ClosingMember/DeleteOrphanedPayments';
+import { FaTrash } from 'react-icons/fa';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -94,6 +97,7 @@ const ClosingCom = ({ user, selectedProgram }) => {
   const [filePreview, setFilePreview] = useState(null);
   const { message, modal } = App.useApp();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isOpenRasidEntry, setIsOpenRasidEntry] = useState(false);
   const [isOpenBanner, setIsOpenBanner] = useState(false);
   const [isEditPdfDataOpen, setIsEditPdfDataOpen] = useState(false);
   const [closingGroups, setClosingGroups] = useState([]);
@@ -104,6 +108,7 @@ const ClosingCom = ({ user, selectedProgram }) => {
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [changingGroup, setChangingGroup] = useState(false);
   const [revertingId, setRevertingId] = useState(null);
+  const [isDeleteOrphanedPaymentsOpen, setIsDeleteOrphanedPaymentsOpen] = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchClosingGroups = async () => {
@@ -696,6 +701,12 @@ const ClosingCom = ({ user, selectedProgram }) => {
             </div>
           </div>
           <div className="header-actions">
+                 {/* <button className="hdr-btn" onClick={() => setIsDeleteOrphanedPaymentsOpen(true)}>
+             <FaTrash size={13} /> Delete Orphaned Payments
+            </button> */}
+                   <button className="hdr-btn" onClick={() => setIsOpenRasidEntry(true)}>
+              <FiPlus size={13} /> Create Payment Entry
+            </button>
             <button className="hdr-btn" onClick={() => setIsOpenDrawer(true)}>
               <FiUsers size={13} /> Pay Status
             </button>
@@ -737,6 +748,17 @@ const ClosingCom = ({ user, selectedProgram }) => {
           setOpen={setIsOpenDrawer}
           closingMemberList={allMembersData}
         />
+        {
+          isOpenRasidEntry && (
+            <GenerateRasidEntry
+              open={isOpenRasidEntry}
+              setOpen={setIsOpenRasidEntry}
+              selectedProgram={selectedProgram}
+              user={user} closingMemberList={allMembersData} />)
+        }
+        {
+          isDeleteOrphanedPaymentsOpen && (<DeleteUnlinkedPayments open={isDeleteOrphanedPaymentsOpen} setOpen={setIsDeleteOrphanedPaymentsOpen} selectedProgram={selectedProgram} user={user} allClosingMembers={allMembersData}  />)
+        }
 
         {selectedRecord && (
           <EditPdfDataForm
