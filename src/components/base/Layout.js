@@ -6,9 +6,10 @@ import TopBar from './TopBar';
 import SideBar from './SideBar';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { setAgentList, setgetAgentDataChange, setPrograms, setSelectedProgram } from '@/redux/slices/commonSlice';
+import { setAgentList, setClosingGroups, setgetAgentDataChange, setPrograms, setSelectedProgram } from '@/redux/slices/commonSlice';
 import { useDispatch, useSelector } from 'react-redux';
 import { FiLayers } from 'react-icons/fi';
+import GlobalPdfWidget from './Globalpdfwidget';
 
 // ─── Skeleton loader ────────────────────────────────────────────────────────
 const SkeletonRow = ({ w = 'w-full', h = 'h-4', className = '' }) => (
@@ -170,12 +171,33 @@ export default function CustomDashboardLayout({ children }) {
     } catch (e) { console.error(e); }
   };
 
+        const fetchClosingGroups = async (programId) => {
+       if (!user?.uid || !programId) return;
+        try {
+          const groupsRef = collection(
+            db, `users/${user.uid}/programs/${programId}/closing_groups`
+          );
+          const snap = await getDocs(groupsRef);
+          const newData=snap.docs.map((doc) => ({
+            id: doc.id,
+            name: doc.data().name,
+            memberCount: doc.data().memberCount || 0,
+            members: doc.data().members || [],
+          }))
+          dispatch(setClosingGroups(newData))
+        } catch (error) {
+          console.error('Error fetching closing groups:', error);
+        } finally {
+        }
+    }
+
   const getProgramData = async () => {
     try {
       const col = collection(db, "users", user.uid, "programs");
       const snap = await getDocs(query(col, orderBy('createdAt', 'desc')));
       const programs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       dispatch(setPrograms(programs));
+       fetchClosingGroups(programs[0]?.id)
       dispatch(setSelectedProgram(programs[0] || null));
     } catch (e) { console.error(e); }
   };
@@ -185,6 +207,7 @@ export default function CustomDashboardLayout({ children }) {
       router.replace("/auth/login");
     }
     if (user) {
+  
       getProgramData();
       getAgentData();
     }
@@ -377,6 +400,7 @@ export default function CustomDashboardLayout({ children }) {
             </div>
           </main>
         </div>
+          <GlobalPdfWidget />
       </div>
     </>
   );

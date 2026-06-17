@@ -6,7 +6,8 @@ const initialState = {
   selectedProgram: null,
   agentsList: [],
     getAgentDataChange:false,
- getMemberDataChange:false
+ getMemberDataChange:false,
+  closingGroupList: [],
 };
 
 export const commonSlice = createSlice({
@@ -18,6 +19,9 @@ export const commonSlice = createSlice({
     },
     setSelectedProgram: (state, action) => {
       state.selectedProgram = action.payload;
+    },
+           setClosingGroups: (state, action) => {
+      state.closingGroupList = action.payload;
     },
     setAgentList: (state, action) => {
       state.agentsList = action.payload;
@@ -32,6 +36,6 @@ export const commonSlice = createSlice({
 });
 
 // Action creators are generated for each case reducer function
-export const { setPrograms,setSelectedProgram ,setAgentList,setgetAgentDataChange,setgetMemberDataChange} = commonSlice.actions;
+export const { setPrograms,setSelectedProgram ,setAgentList,setgetAgentDataChange,setgetMemberDataChange,setClosingGroups} = commonSlice.actions;
 
 export default commonSlice.reducer;

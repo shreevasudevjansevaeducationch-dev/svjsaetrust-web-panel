@@ -1,5 +1,5 @@
 'use client'
-import React, { use, useState } from 'react';
+import React, { use, useEffect, useState } from 'react';
 import { 
     Drawer, 
     Table, 
@@ -27,7 +27,9 @@ import {
 import { PDFDownloadLink, PDFViewer } from '@react-pdf/renderer';
 import SingleMemberPendingPaymentPdf from './PendingPaymentPdf';
 import { useSelector } from 'react-redux';
+import { useAuth } from '@/lib/AuthProvider';
 import dayjs from 'dayjs';
+import { getAdvanceBalance } from '@/lib/advancePayment';
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 
@@ -36,11 +38,24 @@ function MemberPaymentDetails({ visible, onClose, memberData, paymentReport, loa
     console.log(paymentReport,'paymentReport')
     const selectedProgram = useSelector((state) => state.data.selectedProgram);
     const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+    const [advanceBalance, setAdvanceBalance] = useState(0);
+    const [advanceBalanceLoading, setAdvanceBalanceLoading] = useState(false);
+    const { user } = useAuth();
 
 // Update download function
 const handleDownloadPDF = () => {
     setPdfPreviewOpen(true);
 };
+    useEffect(() => {
+        if (visible && memberData?.id && selectedProgram?.id && user?.uid) {
+            setAdvanceBalanceLoading(true);
+            getAdvanceBalance(user.uid, selectedProgram.id, memberData.id)
+                .then(setAdvanceBalance)
+                .catch(() => setAdvanceBalance(0))
+                .finally(() => setAdvanceBalanceLoading(false));
+        }
+    }, [visible, memberData, selectedProgram, user]);
+
     if (!memberData || !paymentReport) return null;
     const { report, summary } = paymentReport;
     const member = memberData;
@@ -149,7 +164,7 @@ const handleDownloadPDF = () => {
         >
             {/* Summary Cards */}
             <Row gutter={16} className="mb-6">
-                <Col span={8}>
+                <Col span={6}>
                     <Card size="small" className="bg-blue-50">
                         <Statistic
                             title="Total Marriages"
@@ -159,7 +174,7 @@ const handleDownloadPDF = () => {
                         />
                     </Card>
                 </Col>
-                <Col span={8}>
+                <Col span={6}>
                     <Card size="small" className="bg-green-50">
                         <Statistic
                             title="Paid"
@@ -173,7 +188,7 @@ const handleDownloadPDF = () => {
                         </div>
                     </Card>
                 </Col>
-                <Col span={8}>
+                <Col span={6}>
                     <Card size="small" className="bg-orange-50">
                         <Statistic
                             title="Pending"
@@ -184,6 +199,19 @@ const handleDownloadPDF = () => {
                         />
                         <div className="text-xs text-gray-500">
                             {report?.summary?.pendingMarriages || 0} Closings
+                        </div>
+                    </Card>
+                </Col>
+                <Col span={6}>
+                    <Card size="small" className="bg-purple-50" loading={advanceBalanceLoading}>
+                        <Statistic
+                            title="Advance Wallet"
+                            value={advanceBalance}
+                            prefix={<WalletOutlined />}
+                            valueStyle={{ color: '#7c3aed', fontSize: '20px', fontWeight: 700 }}
+                        />
+                        <div className="text-xs text-gray-500">
+                            Available balance
                         </div>
                     </Card>
                 </Col>

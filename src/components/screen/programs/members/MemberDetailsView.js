@@ -1,7 +1,7 @@
 'use client'
-import { Button, Card, Descriptions, Modal, Typography, Tabs, Table, Tooltip, App, Tag, Space, Divider, Badge, Drawer } from 'antd'
+import { Button, Card, Descriptions, Modal, Typography, Tabs, Table, Tooltip, App, Tag, Space, Divider, Badge, Drawer, Statistic, Row, Col, Empty } from 'antd'
 import React, { useState, useEffect } from 'react'
-import { EyeOutlined, DeleteOutlined, DollarOutlined, CalendarOutlined, IdcardOutlined, UserOutlined, PhoneOutlined, TagOutlined } from '@ant-design/icons';
+import { EyeOutlined, DeleteOutlined, DollarOutlined, CalendarOutlined, IdcardOutlined, UserOutlined, PhoneOutlined, TagOutlined, WalletOutlined, ArrowUpOutlined, ArrowDownOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import moment from 'moment';
 import { useDispatch, useSelector } from 'react-redux';
@@ -11,6 +11,8 @@ import { useAuth } from '@/lib/AuthProvider';
 import { setgetMemberDataChange } from '@/redux/slices/commonSlice';
 import { getData } from '@/lib/services/firebaseService';
 import dayjs from "dayjs";
+import { getAdvanceBalance, getAdvanceTransactions } from '@/lib/advancePayment';
+import AddAdvancePayment from '@/components/common/addPayment/AddAdvancePayment';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -20,7 +22,11 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
   const [memberTransactions, setMemberTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [isBlocking, setIsBlocking] = useState(false);
-  
+  const [advanceBalance, setAdvanceBalance] = useState(0);
+  const [advanceTxns, setAdvanceTxns] = useState([]);
+  const [advanceTxnsLoading, setAdvanceTxnsLoading] = useState(false);
+  const [advanceDrawerOpen, setAdvanceDrawerOpen] = useState(false);
+
   const { user } = useAuth();
   const dispatch = useDispatch();
   const selectedProgram = useSelector((state) => state.data.selectedProgram);
@@ -175,6 +181,34 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
       },
     }
   ];
+
+  const fetchAdvanceData = async () => {
+    if (!user?.uid || !selectedProgram?.id || !selectedMember?.id) return;
+    setAdvanceTxnsLoading(true);
+    try {
+      const [balance, txns] = await Promise.all([
+        getAdvanceBalance(user.uid, selectedProgram.id, selectedMember.id),
+        getAdvanceTransactions(user.uid, selectedProgram.id, selectedMember.id),
+      ]);
+      setAdvanceBalance(balance);
+      setAdvanceTxns(txns);
+    } catch (e) {
+      console.error("Error fetching advance data:", e);
+    } finally {
+      setAdvanceTxnsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isModalVisible && selectedMember?.id) {
+      fetchAdvanceData();
+    }
+  }, [isModalVisible, selectedMember]);
+
+  const handleAdvanceAdded = async () => {
+    await fetchAdvanceData();
+    setAdvanceDrawerOpen(false);
+  };
 
   // Calculate total amount
   const calculateTotalAmount = () => {
@@ -598,6 +632,159 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
                 )}
               </div>
             </Card>
+          </TabPane>
+
+          <TabPane tab={<span><WalletOutlined /> Advance / Wallet</span>} key="6">
+            <div className="space-y-4">
+              {/* Balance & Actions */}
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Card className="bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-100 text-center">
+                    <Statistic
+                      title={<span className="text-purple-600 font-semibold">Wallet Balance</span>}
+                      value={advanceBalance}
+                      prefix={<WalletOutlined className="text-purple-500" />}
+                      valueStyle={{ color: "#7c3aed", fontSize: 28, fontWeight: 800 }}
+                      suffix={<span className="text-sm text-purple-600">₹</span>}
+                    />
+                  </Card>
+                </Col>
+                <Col span={8}>
+                  <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-100 text-center">
+                    <Statistic
+                      title={<span className="text-green-600 font-semibold">Total Credited</span>}
+                      value={advanceTxns.filter(t => t.type === "credit").reduce((s, t) => s + (t.amount || 0), 0)}
+                      prefix={<ArrowUpOutlined className="text-green-500" />}
+                      valueStyle={{ color: "#16a34a", fontSize: 28, fontWeight: 800 }}
+                      suffix={<span className="text-sm text-green-600">₹</span>}
+                    />
+                  </Card>
+                </Col>
+                <Col span={8}>
+                  <Card className="bg-gradient-to-br from-orange-50 to-amber-50 border-orange-100 text-center">
+                    <Statistic
+                      title={<span className="text-orange-600 font-semibold">Total Used</span>}
+                      value={advanceTxns.filter(t => t.type === "debit").reduce((s, t) => s + (t.amount || 0), 0)}
+                      prefix={<ArrowDownOutlined className="text-orange-500" />}
+                      valueStyle={{ color: "#ea580c", fontSize: 28, fontWeight: 800 }}
+                      suffix={<span className="text-sm text-orange-600">₹</span>}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+
+              <div className="flex justify-between items-center">
+                <Text strong className="text-base">Advance Transaction History</Text>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  className="bg-purple-600"
+                  onClick={() => setAdvanceDrawerOpen(true)}
+                >
+                  Add Advance Payment
+                </Button>
+              </div>
+
+              <Table
+                columns={[
+                  {
+                    title: "Date",
+                    dataIndex: "transactionDate",
+                    key: "transactionDate",
+                    width: 120,
+                    render: (val) => val ? dayjs(val).format("DD/MM/YY") : "-",
+                  },
+                  {
+                    title: "Type",
+                    dataIndex: "type",
+                    key: "type",
+                    width: 90,
+                    render: (type) => (
+                      <Tag color={type === "credit" ? "green" : "orange"} className="capitalize">
+                        {type === "credit" ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                        {" "}{type === "credit" ? "Credit" : "Used"}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: "Amount",
+                    dataIndex: "amount",
+                    key: "amount",
+                    width: 110,
+                    align: "right",
+                    render: (val, record) => (
+                      <span style={{ fontWeight: 700, color: record.type === "credit" ? "#16a34a" : "#ea580c" }}>
+                        {record.type === "credit" ? "+" : "-"}₹{val?.toLocaleString("en-IN") || "0"}
+                      </span>
+                    ),
+                  },
+                  {
+                    title: "Balance",
+                    dataIndex: "balanceAfter",
+                    key: "balanceAfter",
+                    width: 110,
+                    align: "right",
+                    render: (val) => (
+                      <span className="font-mono font-semibold">₹{val?.toLocaleString("en-IN") || "0"}</span>
+                    ),
+                  },
+                  {
+                    title: "Method",
+                    dataIndex: "paymentMethod",
+                    key: "paymentMethod",
+                    width: 90,
+                    render: (method) => {
+                      if (method === "advance") return <Tag color="purple">Wallet</Tag>;
+                      return <Tag color={method === "cash" ? "green" : "blue"}>{method === "cash" ? "Cash" : "Online"}</Tag>;
+                    },
+                  },
+                  {
+                    title: "UTR / Ref",
+                    dataIndex: "onlineReference",
+                    key: "onlineReference",
+                    width: 130,
+                    render: (val) => val ? <span className="text-xs font-mono">{val}</span> : "-",
+                  },
+                  {
+                    title: "Used For",
+                    key: "usedFor",
+                    width: 150,
+                    render: (_, record) => {
+                      if (record.type === "credit") return <span className="text-gray-400 text-xs">Advance deposit</span>;
+                      return (
+                        <Tooltip title={record.relatedMarriageName}>
+                          <span className="text-xs truncate block max-w-[130px]">
+                            {record.relatedMarriageName || "Closing payment"}
+                          </span>
+                        </Tooltip>
+                      );
+                    },
+                  },
+                  {
+                    title: "Note",
+                    dataIndex: "note",
+                    key: "note",
+                    width: 150,
+                    ellipsis: true,
+                    render: (val) => val || "-",
+                  },
+                ]}
+                dataSource={advanceTxns}
+                rowKey="id"
+                loading={advanceTxnsLoading}
+                size="small"
+                scroll={{ x: "max-content" }}
+                pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                locale={{ emptyText: <Empty description="No advance transactions yet" /> }}
+              />
+            </div>
+
+            <AddAdvancePayment
+              open={advanceDrawerOpen}
+              onClose={() => setAdvanceDrawerOpen(false)}
+              onSuccess={handleAdvanceAdded}
+              preSelectedMember={selectedMember?.id}
+            />
           </TabPane>
         </Tabs>
       )}
