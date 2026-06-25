@@ -3,6 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSelector } from 'react-redux';
 import { useAuth } from '@/lib/AuthProvider';
 import { deleteData, getData, updateData } from '@/lib/services/firebaseService';
+import { doc, runTransaction } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import {
   Button, Space, Modal, App, Card, Row, Col, DatePicker, Select, Input,
   Tag, Tooltip, Divider, Typography, Alert, Drawer, Segmented, Badge, Table,
@@ -183,6 +185,8 @@ const TransactionsPage = () => {
     setDeleteLoading(true);
     try {
       await deleteData(`/users/${user.uid}/programs/${program.id}/transactions`, transaction.id);
+
+      // Revert linked pending payment
       if (transaction.paymentPendingId) {
         try {
           await updateData(
@@ -194,11 +198,27 @@ const TransactionsPage = () => {
               lastDeletedTransactionId: transaction.id, lastDeletedAt: dayjs().toISOString(),
             }
           );
-          antdMessage.success('Transaction deleted and pending payment restored');
-        } catch { antdMessage.warning('Transaction deleted but failed to update pending payment'); }
-      } else {
-        antdMessage.success('Transaction deleted successfully');
+        } catch { /* non-critical */ }
       }
+
+      // Decrement member payment stats (capped at 0)
+      if (transaction.payerId && transaction.amount > 0) {
+        try {
+          await runTransaction(db, async (tx) => {
+            const memberRef = doc(db, `users/${user.uid}/programs/${program.id}/members`, transaction.payerId);
+            const memberSnap = await tx.get(memberRef);
+            if (memberSnap.exists()) {
+              const data = memberSnap.data();
+              tx.update(memberRef, {
+                closingAmountPaid: Math.max(0, (data.closingAmountPaid || 0) - transaction.amount),
+                closingPaidCount:  Math.max(0, (data.closingPaidCount || 0) - 1),
+              });
+            }
+          });
+        } catch { /* non-critical */ }
+      }
+
+      antdMessage.success('Transaction deleted successfully');
       setTransactions(prev => prev.filter(t => t.id !== transaction.id));
       setViewModalVisible(false);
       fetchTransactions();

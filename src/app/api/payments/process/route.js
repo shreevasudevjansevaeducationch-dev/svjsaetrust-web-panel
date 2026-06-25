@@ -235,6 +235,15 @@ async function processSinglePayment(uid, body) {
 
   await sb.commit();
 
+  // ─── Update member payment stats ─────────────────────────────────────────
+  const memberTotalPaid = distributions.reduce((s, d) => s + d.amount, 0);
+  if (memberTotalPaid > 0) {
+    await adminDb.doc(`${basePath}/members/${payerId}`).update({
+      closingAmountPaid: admin.firestore.FieldValue.increment(memberTotalPaid),
+      closingPaidCount:  admin.firestore.FieldValue.increment(distributions.length),
+    });
+  }
+
   return NextResponse.json({
     success:   true,
     processed: distributions.length,
@@ -419,6 +428,7 @@ async function processBulkPayment(uid, body) {
   let globalSeq   = 0;
   let totalProc   = 0;
   let totalPaidAmt = 0;
+  const memberPaymentStats = {}; // { memberId: { amount, count } }
 
   for (const { member, closings, amountToPay, payAmount } of memberPayments) {
     let remaining = amountToPay;
@@ -491,10 +501,24 @@ async function processBulkPayment(uid, body) {
       remaining    -= pay;
       totalPaidAmt += pay;
       totalProc++;
+
+      // Track per-member stats for closingAmountPaid / closingPaidCount
+      if (!memberPaymentStats[member.id]) memberPaymentStats[member.id] = { amount: 0, count: 0 };
+      memberPaymentStats[member.id].amount += pay;
+      memberPaymentStats[member.id].count  += 1;
     }
   }
 
   await sb.commit();
+
+  // ─── Update member payment stats ─────────────────────────────────────────
+  const memberStatUpdates = Object.entries(memberPaymentStats).map(([memberId, stats]) => {
+    return adminDb.doc(`${basePath}/members/${memberId}`).update({
+      closingAmountPaid: admin.firestore.FieldValue.increment(stats.amount),
+      closingPaidCount:  admin.firestore.FieldValue.increment(stats.count),
+    });
+  });
+  if (memberStatUpdates.length > 0) await Promise.all(memberStatUpdates);
 
   const remaining = isCustomMode
     ? 0 // custom mode mein koi remaining nahi

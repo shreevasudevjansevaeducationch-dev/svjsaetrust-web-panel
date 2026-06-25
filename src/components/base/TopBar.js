@@ -17,10 +17,10 @@ import {
 import RequestSection from '../common/requestSection';
 import AddProgram from '../common/program';
 import { useAuth } from '@/lib/AuthProvider';
-import { doc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, deleteDoc, collection, getDocs } from 'firebase/firestore';
 import AddAgent from '../screen/agents/AddAgents';
 import { useDispatch, useSelector } from 'react-redux';
-import { setSelectedProgram } from '@/redux/slices/commonSlice';
+import { setClosingGroups, setSelectedProgram } from '@/redux/slices/commonSlice';
 import AddMember from '../screen/programs/members/AddMember';
 import AddPaymentModal from '../common/addPayment/AddPaymentModal';
 
@@ -68,7 +68,28 @@ const TopBar = ({ sidebarCollapsed, toggleSidebar, showNotifications, toggleNoti
     }
   };
 
+   const fetchClosingGroups = async (programId) => {
+         if (!user?.uid || !programId) return;
+          try {
+            const groupsRef = collection(
+              db, `users/${user.uid}/programs/${programId}/closing_groups`
+            );
+            const snap = await getDocs(groupsRef);
+            const newData=snap.docs.map((doc) => ({
+              id: doc.id,
+              name: doc.data().name,
+              memberCount: doc.data().memberCount || 0,
+              members: doc.data().members || [],
+            }))
+            dispatch(setClosingGroups(newData))
+          } catch (error) {
+            console.error('Error fetching closing groups:', error);
+          } finally {
+          }
+      }
+
   const handleProgramSelect = (programId) => {
+    fetchClosingGroups(programId)
     dispatch(setSelectedProgram(programList.find(p => p.id === programId)));
   };
 

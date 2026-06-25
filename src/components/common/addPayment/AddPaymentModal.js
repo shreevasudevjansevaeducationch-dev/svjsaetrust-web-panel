@@ -10,7 +10,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { getData, createData } from '@/lib/services/firebaseService';
 import { getAdvanceBalance, addAdvanceDebit } from '@/lib/advancePayment';
 import { useAuth } from '@/lib/AuthProvider';
-import { updateDoc, doc, getDocs, query, where, collection, writeBatch } from 'firebase/firestore';
+import { updateDoc, doc, getDocs, query, where, collection, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   DollarOutlined,
@@ -267,9 +267,7 @@ const AddPaymentModal = () => {
 
   /* ── Process payment ── */
   const processPayment = async (marriageIds, values) => {
-    const amount           = Number(values.amount);
-    const marriageCount    = marriageIds.length;
-    const individualAmount = marriageCount > 0 ? amount / marriageCount : amount;
+    const amount = Number(values.amount);
     setLoading(true);
     try {
       const transactions = [];
@@ -282,8 +280,9 @@ const AddPaymentModal = () => {
         const member      = members.find((m) => m.id === selectedMember);
         const txNumber    = `TRX-${timestamp}-${batchId}-${(i + 1).toString().padStart(3, '0')}`;
 
+        const txAmount = member?.isFixedAmountMember ? (member.fixedAmount || 15200) : (member.payAmount || amount);
         const txData = {
-          amount: member.payAmount || individualAmount,
+          amount: txAmount,
           paymentMethod: values.paymentMethod,
           paymentDate: dayjs(values.paymentDate).toISOString(),
           note: values.note || '',
@@ -322,13 +321,20 @@ const AddPaymentModal = () => {
         };
 
         const txId = await createData(`/users/${user.uid}/programs/${selectedProgram.id}/transactions`, txData);
-        transactions.push({ marriageId, payerId: selectedMember, transactionId: txId, amount: individualAmount, paymentDate: dayjs(values.paymentDate).toISOString(), transactionNumber: txNumber });
+        transactions.push({ marriageId, payerId: selectedMember, transactionId: txId, amount: txAmount, paymentDate: dayjs(values.paymentDate).toISOString(), transactionNumber: txNumber });
       }
 
       const toUpdate = transactions.filter((t) =>
         paymentPendingEntries.some((p) => p.closingMemberId === t.marriageId && p.memberId === t.payerId)
       );
       if (toUpdate.length > 0) await updatePendingPaymentEntries(toUpdate);
+
+      // Update member closing payment stats
+      const totalPaid = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+      await updateDoc(doc(db, `users/${user.uid}/programs/${selectedProgram.id}/members`, selectedMember), {
+        closingAmountPaid: increment(totalPaid),
+        closingPaidCount: increment(transactions.length),
+      });
 
       setPaymentSummary({ count: transactions.length, amount, method: values.paymentMethod, reference: values.onlineReference });
       message.success({ content: <div><div className="font-medium">Payment Successful!</div><div className="text-xs">Processed {transactions.length} payment(s) of ₹{amount}</div></div>, duration: 3 });
@@ -357,7 +363,7 @@ const AddPaymentModal = () => {
         const member     = members.find((m) => m.id === selectedMember);
         const txNumber   = `TRX-${timestamp}-${batchId}-${(i + 1).toString().padStart(3, '0')}`;
 
-        const txAmount   = member?.payAmount || perMarriageAmount;
+        const txAmount   = member?.isFixedAmountMember ? (member?.fixedAmount || 15200) : (member?.payAmount || perMarriageAmount);
 
         const txData = {
           amount: txAmount,
@@ -417,6 +423,12 @@ const AddPaymentModal = () => {
 
       const newBal = await getAdvanceBalance(user.uid, selectedProgram.id, selectedMember);
       setMemberAdvanceBalance(newBal);
+
+      const totalPaid = transactions.reduce((sum, t) => sum + Number(t.amount), 0);
+      await updateDoc(doc(db, `users/${user.uid}/programs/${selectedProgram.id}/members`, selectedMember), {
+        closingAmountPaid: increment(totalPaid),
+        closingPaidCount: increment(transactions.length),
+      });
 
       setPaymentSummary({ count: transactions.length, amount: totalAmount, method: 'advance', reference: '' });
       message.success({ content: <div><div className="font-medium">Payment Successful!</div><div className="text-xs">Processed {transactions.length} payment(s) of ₹{totalAmount} from wallet</div></div>, duration: 3 });
@@ -537,7 +549,8 @@ const AddPaymentModal = () => {
     setMarriageSearchText('');
     setUseAdvanceWallet(false);
     const member = members.find((m) => m.id === memberId);
-    form.setFieldsValue({ amount: member?.payAmount || 200 });
+    const defaultAmount = member?.isFixedAmountMember ? (member?.fixedAmount || 15200) : (member?.payAmount || 200);
+    form.setFieldsValue({ amount: defaultAmount });
     const { alreadyPaidIds } = await fetchMemberPaymentInfo(memberId);
     if (alreadyPaidIds.length > 0) message.info(`${alreadyPaidIds.length} marriage(s) already paid`, 2);
     try {

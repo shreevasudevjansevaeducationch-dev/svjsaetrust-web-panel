@@ -379,6 +379,13 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
                     </Descriptions.Item>
                   </>
                 )}
+                {selectedMember.isFixedAmountMember && (
+                  <Descriptions.Item label="Fixed Payment">
+                    <Tag color="purple" className="text-base font-bold">
+                      ₹{selectedMember.fixedAmount?.toLocaleString('en-IN') || 0}
+                    </Tag>
+                  </Descriptions.Item>
+                )}
               </Descriptions>
             </Card>
 
@@ -510,14 +517,34 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
           
           <TabPane tab="Transactions" key="4">
             <div className="mb-4">
-              <div className="flex justify-between items-center mb-3">
-                <Title level={5}>Transaction History</Title>
-                <div className="text-lg">
-                  <span className="font-semibold">Total Paid: </span>
-                  <span className="text-green-600 font-bold">₹{calculateTotalAmount().toFixed(2)}</span>
-                </div>
-              </div>
-              
+              {/* Closing Payment Stats */}
+              <Row gutter={12} className="mb-4">
+                <Col span={8}>
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-gray-500 mb-1">Closing Amount Paid</div>
+                    <div className="text-xl font-black text-green-600">
+                      ₹{(selectedMember.closingAmountPaid || 0).toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-gray-500 mb-1">Closings Paid</div>
+                    <div className="text-xl font-black text-blue-600">
+                      {selectedMember.closingPaidCount || 0}
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+                    <div className="text-xs text-gray-500 mb-1">Total Transaction Value</div>
+                    <div className="text-xl font-black text-amber-600">
+                      ₹{calculateTotalAmount().toLocaleString("en-IN")}
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+
               <Table
                 columns={columns}
                 dataSource={memberTransactions}
@@ -564,6 +591,10 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
                           )}
                         </>
                       )}
+                      <div className="border-t border-blue-100 pt-1 mt-1">
+                        <div>📊 Closing Amount Paid: <strong className="text-green-600">₹{(selectedMember.closingAmountPaid || 0).toLocaleString("en-IN")}</strong></div>
+                        <div>🔢 Closings Paid: <strong className="text-blue-600">{selectedMember.closingPaidCount || 0}</strong></div>
+                      </div>
                     </div>
                   </div>
 

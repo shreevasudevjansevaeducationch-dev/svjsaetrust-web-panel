@@ -12,7 +12,7 @@ import {
   CreditCardOutlined, WalletOutlined, TeamOutlined, UnorderedListOutlined,
   AppstoreOutlined, ThunderboltOutlined, CalendarOutlined, InfoCircleOutlined,
   SortAscendingOutlined, GlobalOutlined, PercentageOutlined,
-  EyeOutlined, RocketOutlined, EditOutlined, SettingOutlined
+  EyeOutlined, RocketOutlined, EditOutlined, SettingOutlined, TagOutlined
 } from '@ant-design/icons';
 import { collection, query, where, getDocs, getDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -67,11 +67,6 @@ async function fetchPaymentDataAPI(programId) {
   return callApi(`/api/payments/fetch?programId=${programId}`);
 }
 
-// ✅ NEW: Fetch pending closings for specific members
-async function fetchMemberPendingClosingsAPI(programId, memberIds) {
-  return callApi(`/api/payments/fetch-pending?programId=${programId}&memberIds=${memberIds.join(',')}`);
-}
-
 async function processSinglePaymentAPI(payload) {
   return callApi('/api/payments/process', {
     method: 'POST',
@@ -98,13 +93,24 @@ async function checkDupRefAPI(programId, onlineReference) {
   }
 }
 
+// ─── CLOSING GROUP DOT COLOR ───────────────────────────────────────────────────
+const GROUP_COLORS = [
+  '#6366f1', '#10b981', '#f97316', '#3b82f6', '#8b5cf6',
+  '#ec4899', '#14b8a6', '#f59e0b', '#ef4444', '#06b6d4',
+];
+function groupColor(id, index) {
+  if (!id) return '#d1d5db';
+  const hash = [...(id || '')].reduce((h, c) => h + c.charCodeAt(0), 0);
+  return GROUP_COLORS[hash % GROUP_COLORS.length];
+}
+
 // ─── CLOSING SELECTOR MODAL ───────────────────────────────────────────────────
-// Member ke sab pending closings dikhata hai, user select kar sakta hai
-function ClosingSelectorModal({ open, onClose, member, pendingClosings, selectedClosingIds, onConfirm }) {
+function ClosingSelectorModal({ open, onClose, member, pendingClosings, selectedClosingIds, onConfirm, closingGroupMap }) {
   const [localSelected, setLocalSelected] = useState([]);
+  const [groupFilter, setGroupFilter] = useState(null);
 
   useEffect(() => {
-    if (open) setLocalSelected(selectedClosingIds || []);
+    if (open) { setLocalSelected(selectedClosingIds || []); setGroupFilter(null); }
   }, [open, selectedClosingIds]);
 
   const toggleClosing = (id) => {
@@ -113,15 +119,31 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
     );
   };
 
-  const selectAll = () => setLocalSelected(pendingClosings.map(c => c.id));
+  const visibleClosings = useMemo(() => {
+    if (!groupFilter) return pendingClosings;
+    return pendingClosings.filter(c => c.closingGroupId === groupFilter);
+  }, [pendingClosings, groupFilter]);
+
+  const selectAll = () => setLocalSelected(visibleClosings.map(c => c.id));
   const clearAll = () => setLocalSelected([]);
+
+  // Unique groups present in this member's pending closings
+  const availableGroups = useMemo(() => {
+    const seen = {};
+    for (const c of pendingClosings) {
+      if (c.closingGroupId && !seen[c.closingGroupId]) {
+        seen[c.closingGroupId] = closingGroupMap?.[c.closingGroupId]?.name || c.closingGroupId;
+      }
+    }
+    return Object.entries(seen).map(([id, name]) => ({ id, name }));
+  }, [pendingClosings, closingGroupMap]);
 
   const totalAmount = localSelected.length * (member?.payAmount || 200);
 
   return (
-    <Modal
+    <Drawer
       open={open}
-      onCancel={onClose}
+      onClose={onClose}
       title={
         <div className="flex items-center gap-3">
           <Avatar src={member?.photoURL} size={36}
@@ -150,7 +172,8 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
           </div>
         </div>
       }
-      width={480}
+      width={400}
+      destroyOnHidden
     >
       <div className="space-y-3">
         {/* Quick actions */}
@@ -167,13 +190,41 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
           </div>
         </div>
 
+        {/* Closing Group filter */}
+        {availableGroups.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-400 flex items-center gap-1">
+              <TagOutlined style={{ fontSize: 11 }} /> Group:
+            </span>
+            <Button
+              size="small"
+              type={!groupFilter ? 'primary' : 'default'}
+              className={!groupFilter ? 'bg-indigo-500 border-indigo-500 text-xs' : 'text-xs'}
+              onClick={() => setGroupFilter(null)}
+            >
+              All ({pendingClosings.length})
+            </Button>
+            {availableGroups.map(g => (
+              <Button key={g.id} size="small"
+                type={groupFilter === g.id ? 'primary' : 'default'}
+                className={`text-xs h-6 px-2 rounded-full ${groupFilter === g.id ? '' : 'border-gray-200'}`}
+                style={groupFilter === g.id ? { background: groupColor(g.id), borderColor: groupColor(g.id) } : {}}
+                onClick={() => setGroupFilter(prev => prev === g.id ? null : g.id)}
+              >
+                <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: groupColor(g.id) }} />
+                {g.name}
+              </Button>
+            ))}
+          </div>
+        )}
+
         {/* Quick select buttons: first N */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400">Quick:</span>
-          {[1, 2, 3, 5, 10].filter(n => n <= pendingClosings.length).map(n => (
+          {[1, 2, 3, 5, 10].filter(n => n <= visibleClosings.length).map(n => (
             <Button key={n} size="small" type="default"
               className="text-xs h-6 px-2 rounded-full border-indigo-200 text-indigo-600"
-              onClick={() => setLocalSelected(pendingClosings.slice(0, n).map(c => c.id))}>
+              onClick={() => setLocalSelected(visibleClosings.slice(0, n).map(c => c.id))}>
               First {n}
             </Button>
           ))}
@@ -181,11 +232,12 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
 
         {/* Closing list */}
         <div className="border border-gray-200 rounded-xl overflow-hidden" style={{ maxHeight: 320, overflowY: 'auto' }}>
-          {pendingClosings.length === 0
+          {visibleClosings.length === 0
             ? <Empty description="No pending closings" className="py-8" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            : pendingClosings.map((closing, i) => {
+            : visibleClosings.map((closing, i) => {
                 const isSelected = localSelected.includes(closing.id);
                 const idx = localSelected.indexOf(closing.id);
+                const groupName = closingGroupMap?.[closing.closingGroupId]?.name;
                 return (
                   <div key={closing.id}
                     onClick={() => toggleClosing(closing.id)}
@@ -202,9 +254,18 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-800 truncate">{closing.closingMemberName || closing.closingMemberId}</div>
                       <div className="text-xs text-gray-400">{closing.closingMemberReg || '—'}</div>
-                      {closing.marriageDate && (
-                        <div className="text-xs text-indigo-400"><CalendarOutlined className="mr-1" />{closing.marriageDate}</div>
-                      )}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {closing.marriageDate && (
+                          <div className="text-xs text-indigo-400"><CalendarOutlined className="mr-1" />{closing.marriageDate}</div>
+                        )}
+                        {groupName && (
+                          <span className="inline-flex items-center gap-1 text-xs rounded-full px-1.5 py-0.5"
+                            style={{ background: `${groupColor(closing.closingGroupId)}18`, color: groupColor(closing.closingGroupId), border: `1px solid ${groupColor(closing.closingGroupId)}40` }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: groupColor(closing.closingGroupId) }} />
+                            {groupName}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="text-xs font-bold text-gray-600">{fmt(member?.payAmount || 200)}</div>
@@ -219,17 +280,26 @@ function ClosingSelectorModal({ open, onClose, member, pendingClosings, selected
               })}
         </div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 
 // ─── CLOSING DETAILS DRAWER ───────────────────────────────────────────────────
-function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
+function MemberClosingsDrawer({ open, onClose, member, programId, user, closingGroupList }) {
   const [closings, setClosings] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [groupFilter, setGroupFilter] = useState(null);
+
+  // Build a map for quick lookup
+  const closingGroupMap = useMemo(() => {
+    const map = {};
+    (closingGroupList || []).forEach(g => { map[g.id] = g; });
+    return map;
+  }, [closingGroupList]);
 
   useEffect(() => {
     if (!open || !member || !programId || !user) return;
+    setGroupFilter(null);
     (async () => {
       setLoading(true);
       try {
@@ -252,6 +322,7 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
               closingMemberPhoto: cm.photoURL || '',
               closingMemberFather: cm.fatherName || '',
               marriageDate: cm.marriage_date || entry.closingAt || '',
+              closingGroupId: cm.closingGroupId || entry.closingGroupId || null,
             };
           } catch { return entry; }
         }));
@@ -263,6 +334,22 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
 
   const pendingCount = closings.filter(c => c.status === 'pending').length;
   const paidCount = closings.filter(c => c.status === 'paid').length;
+
+  // Groups present in this member's closings
+  const availableGroups = useMemo(() => {
+    const seen = {};
+    for (const c of closings) {
+      if (c.closingGroupId && !seen[c.closingGroupId]) {
+        seen[c.closingGroupId] = closingGroupMap[c.closingGroupId]?.name || c.closingGroupId;
+      }
+    }
+    return Object.entries(seen).map(([id, name]) => ({ id, name }));
+  }, [closings, closingGroupMap]);
+
+  const filteredClosings = useMemo(() => {
+    if (!groupFilter) return closings;
+    return closings.filter(c => c.closingGroupId === groupFilter);
+  }, [closings, groupFilter]);
 
   return (
     <Drawer
@@ -296,16 +383,49 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
         ))}
       </Row>
 
+      {/* Closing Group filter */}
+      {availableGroups.length > 0 && (
+        <div className="mb-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+          <div className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+            <TagOutlined style={{ fontSize: 11 }} /> Filter by Closing Group
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              size="small"
+              type={!groupFilter ? 'primary' : 'default'}
+              className={`text-xs rounded-full ${!groupFilter ? 'bg-indigo-500 border-indigo-500' : ''}`}
+              onClick={() => setGroupFilter(null)}
+            >
+              All ({closings.length})
+            </Button>
+            {availableGroups.map(g => (
+              <Button key={g.id} size="small"
+                type={groupFilter === g.id ? 'primary' : 'default'}
+                className="text-xs rounded-full"
+                style={groupFilter === g.id
+                  ? { background: groupColor(g.id), borderColor: groupColor(g.id), color: '#fff' }
+                  : { borderColor: `${groupColor(g.id)}60`, color: groupColor(g.id) }}
+                onClick={() => setGroupFilter(prev => prev === g.id ? null : g.id)}
+              >
+                <span className="inline-block w-1.5 h-1.5 rounded-full mr-1" style={{ background: groupFilter === g.id ? '#fff' : groupColor(g.id) }} />
+                {g.name} ({closings.filter(c => c.closingGroupId === g.id).length})
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {loading
         ? <div className="flex items-center justify-center py-16"><Spin /></div>
-        : closings.length === 0
-          ? <Empty description="No closing entries found" />
+        : filteredClosings.length === 0
+          ? <Empty description={groupFilter ? 'No closings in this group' : 'No closing entries found'} />
           : (
             <div className="space-y-3">
-              {closings.map((c, i) => {
+              {filteredClosings.map((c, i) => {
                 const isPaid = c.status === 'paid';
                 const isPartial = c.status === 'partial';
                 const payAmount = c.payAmount || member?.payAmount || 200;
+                const groupName = closingGroupMap[c.closingGroupId]?.name;
                 return (
                   <div key={c.id}
                     className={`rounded-2xl border p-3 flex items-center gap-3 transition-all
@@ -321,7 +441,17 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
                       <div className="font-semibold text-sm text-gray-900 truncate">{c.closingMemberName}</div>
                       <div className="text-xs text-gray-400">{c.closingMemberReg}</div>
                       {c.closingMemberFather && <div className="text-xs text-gray-400 truncate">S/o {c.closingMemberFather}</div>}
-                      {c.marriageDate && <div className="text-xs text-indigo-400 mt-0.5"><CalendarOutlined className="mr-1" />{c.marriageDate}</div>}
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {c.marriageDate && <div className="text-xs text-indigo-400"><CalendarOutlined className="mr-1" />{c.marriageDate}</div>}
+                        {/* ✅ Show Closing Group name */}
+                        {groupName && (
+                          <span className="inline-flex items-center gap-1 text-xs rounded-full px-1.5 py-0.5"
+                            style={{ background: `${groupColor(c.closingGroupId)}18`, color: groupColor(c.closingGroupId), border: `1px solid ${groupColor(c.closingGroupId)}40` }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: groupColor(c.closingGroupId) }} />
+                            {groupName}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="font-bold text-sm text-gray-800">{fmt(c.paidAmount || 0)} / {fmt(payAmount)}</div>
@@ -341,8 +471,7 @@ function MemberClosingsDrawer({ open, onClose, member, programId, user }) {
 }
 
 // ─── BULK PAYMENT DRAWER ──────────────────────────────────────────────────────
-// ✅ NEW: Ab har member ke liye specific closings select kar sakte ho
-function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName, user, onSuccess }) {
+function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName, user, onSuccess, closingGroupList }) {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -350,13 +479,22 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
   const [refValid, setRefValid] = useState(true);
   const [checkingRef, setCheckingRef] = useState(false);
 
-  // ✅ NEW STATE: Per-member pending closings aur selected closings
-  const [memberPendingClosings, setMemberPendingClosings] = useState({}); // { memberId: [closing, ...] }
-  const [memberSelectedClosings, setMemberSelectedClosings] = useState({}); // { memberId: [closingId, ...] }
+  const [memberPendingClosings, setMemberPendingClosings] = useState({});
+  const [memberSelectedClosings, setMemberSelectedClosings] = useState({});
   const [fetchingClosings, setFetchingClosings] = useState(false);
   const [selectorModal, setSelectorModal] = useState({ open: false, member: null });
 
-  // ✅ Fetch each member's pending closings when drawer opens
+  const [bulkGroupFilter, setBulkGroupFilter] = useState(null);
+
+  // ✅ NEW: member list search
+  const [memberSearch, setMemberSearch] = useState('');
+
+  const closingGroupMap = useMemo(() => {
+    const map = {};
+    (closingGroupList || []).forEach(g => { map[g.id] = g; });
+    return map;
+  }, [closingGroupList]);
+
   useEffect(() => {
     if (!open || !selectedRows.length || !programId || !user) return;
 
@@ -365,8 +503,6 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
       try {
         const memberIds = selectedRows.map(r => r.id);
 
-        // Fetch all pending payment_pending entries for these members
-        // Firestore mein 'in' max 30 items allow karta hai
         const chunks = [];
         for (let i = 0; i < memberIds.length; i += 30) chunks.push(memberIds.slice(i, i + 30));
 
@@ -378,13 +514,9 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
           allEntries.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
         }
 
-        // JS mein filter: only pending, not deleted
         const pending = allEntries.filter(p => p.delete_flag !== true && (!p.status || p.status === 'pending'));
 
-        // Enrich with closing member info
         const closingMemberIds = [...new Set(pending.map(p => p.closingMemberId || p.marriageId).filter(Boolean))];
-
-        // Batch fetch closing member details
         const closingMemberMap = {};
         const cmChunks = [];
         for (let i = 0; i < closingMemberIds.length; i += 10) cmChunks.push(closingMemberIds.slice(i, i + 10));
@@ -398,7 +530,6 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
           }));
         }
 
-        // Group by memberId, enrich with closing member details
         const grouped = {};
         for (const entry of pending) {
           if (!grouped[entry.memberId]) grouped[entry.memberId] = [];
@@ -410,12 +541,12 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
             closingMemberReg: cm.registrationNumber || entry.closingMemberRegistrationNumber || '—',
             closingMemberPhoto: cm.photoURL || '',
             marriageDate: cm.marriage_date || entry.marriageDate || '',
+            closingGroupId: cm.closingGroupId || entry.closingGroupId || null,
           });
         }
 
         setMemberPendingClosings(grouped);
 
-        // ✅ Default: sabhi pending closings pre-select karo
         const defaultSelected = {};
         for (const [memberId, closings] of Object.entries(grouped)) {
           defaultSelected[memberId] = closings.map(c => c.id);
@@ -437,10 +568,38 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
       setRefValid(true);
       setMemberPendingClosings({});
       setMemberSelectedClosings({});
+      setBulkGroupFilter(null);
+      setMemberSearch('');
     }
   }, [open, form]);
 
-  // ✅ Calculate distribution based on selected closings per member
+  useEffect(() => {
+    if (Object.keys(memberPendingClosings).length === 0) return;
+    const newSelected = {};
+    for (const [memberId, closings] of Object.entries(memberPendingClosings)) {
+      if (bulkGroupFilter) {
+        newSelected[memberId] = closings
+          .filter(c => c.closingGroupId === bulkGroupFilter)
+          .map(c => c.id);
+      } else {
+        newSelected[memberId] = closings.map(c => c.id);
+      }
+    }
+    setMemberSelectedClosings(newSelected);
+  }, [bulkGroupFilter, memberPendingClosings]);
+
+  const availableClosingGroups = useMemo(() => {
+    const seen = {};
+    for (const closings of Object.values(memberPendingClosings)) {
+      for (const c of closings) {
+        if (c.closingGroupId && !seen[c.closingGroupId]) {
+          seen[c.closingGroupId] = closingGroupMap[c.closingGroupId]?.name || c.closingGroupId;
+        }
+      }
+    }
+    return Object.entries(seen).map(([id, name]) => ({ id, name }));
+  }, [memberPendingClosings, closingGroupMap]);
+
   const memberDistribution = useMemo(() => {
     return selectedRows
       .map(member => {
@@ -449,21 +608,33 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
         const pendingClosings = memberPendingClosings[member.id] || [];
         const selectedClosings = pendingClosings.filter(c => selectedIds.includes(c.id));
         const amountToPay = selectedClosings.length * payAmount;
-
-        return {
-          member,
-          payAmount,
-          selectedClosings,
-          selectedCount: selectedClosings.length,
-          totalPendingCount: pendingClosings.length,
-          amountToPay,
-        };
+        return { member, payAmount, selectedClosings, selectedCount: selectedClosings.length, totalPendingCount: pendingClosings.length, amountToPay };
       })
-      .filter(d => d.selectedCount > 0); // Sirf wo members jinke koi closing selected ho
+      .filter(d => d.selectedCount > 0);
   }, [selectedRows, memberSelectedClosings, memberPendingClosings]);
 
   const grandTotal = memberDistribution.reduce((s, d) => s + d.amountToPay, 0);
   const totalClosingsSelected = memberDistribution.reduce((s, d) => s + d.selectedCount, 0);
+
+  const membersWithFilteredClosings = useMemo(() => {
+    if (!bulkGroupFilter) return selectedRows;
+    return selectedRows.filter(member => {
+      const pending = memberPendingClosings[member.id] || [];
+      return pending.some(c => c.closingGroupId === bulkGroupFilter);
+    });
+  }, [bulkGroupFilter, selectedRows, memberPendingClosings]);
+
+  // ✅ Filter selectedRows by search text (name, reg no, phone)
+  const filteredMemberRows = useMemo(() => {
+    if (!memberSearch.trim()) return selectedRows;
+    const s = memberSearch.toLowerCase().trim();
+    return selectedRows.filter(m =>
+      m.displayName?.toLowerCase().includes(s) ||
+      m.registrationNumber?.toLowerCase().includes(s) ||
+      m.phone?.includes(s) ||
+      m.fatherName?.toLowerCase().includes(s)
+    );
+  }, [selectedRows, memberSearch]);
 
   const handleCheckRef = async (ref) => {
     if (!ref || !programId) return;
@@ -488,7 +659,6 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
 
     setLoading(true);
     try {
-      // ✅ NEW: Per-member selected closing IDs bhejo
       const memberClosingSelections = {};
       for (const d of memberDistribution) {
         memberClosingSelections[d.member.id] = d.selectedClosings.map(c => c.id);
@@ -498,7 +668,7 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
         programId,
         programName,
         memberIds: selectedRows.map(r => r.id),
-        memberClosingSelections, // ✅ NEW field
+        memberClosingSelections,
         paymentMethod: values.paymentMethod,
         paymentDate: dayjs(values.paymentDate).toISOString(),
         note: values.note || '',
@@ -524,21 +694,15 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
     }
   };
 
-  // ✅ Open closing selector for a specific member
-  const openClosingSelector = (member) => {
-    setSelectorModal({ open: true, member });
-  };
-
+  const openClosingSelector = (member) => setSelectorModal({ open: true, member });
   const handleClosingConfirm = (memberId, selectedIds) => {
     setMemberSelectedClosings(prev => ({ ...prev, [memberId]: selectedIds }));
   };
 
-  const selectorMember = selectorModal.member;
-
   return (
     <>
       <Drawer
-        open={open} onClose={onClose} width={640} destroyOnClose
+        open={open} onClose={onClose} width={660} destroyOnClose
         title={
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md">
@@ -581,7 +745,56 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
             ))}
           </div>
 
-          {/* ✅ NEW: Per-member closing selection table */}
+          {/* Closing Group filter */}
+          {availableClosingGroups.length > 0 && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <TagOutlined className="text-indigo-500" style={{ fontSize: 13 }} />
+                <span className="text-sm font-semibold text-indigo-700">Filter by Closing Group</span>
+                {bulkGroupFilter && (
+                  <span className="text-xs text-indigo-400 ml-auto">
+                    {membersWithFilteredClosings.length} members have this group's closings
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="small"
+                  type={!bulkGroupFilter ? 'primary' : 'default'}
+                  className={`rounded-full text-xs ${!bulkGroupFilter ? 'bg-indigo-500 border-indigo-500' : 'border-indigo-200 text-indigo-600'}`}
+                  onClick={() => setBulkGroupFilter(null)}
+                >
+                  All Groups
+                </Button>
+                {availableClosingGroups.map(g => {
+                  const countInGroup = Object.values(memberPendingClosings).reduce((sum, closings) =>
+                    sum + closings.filter(c => c.closingGroupId === g.id).length, 0);
+                  return (
+                    <Button key={g.id} size="small"
+                      className="rounded-full text-xs"
+                      style={bulkGroupFilter === g.id
+                        ? { background: groupColor(g.id), borderColor: groupColor(g.id), color: '#fff' }
+                        : { borderColor: `${groupColor(g.id)}50`, color: groupColor(g.id), background: `${groupColor(g.id)}10` }}
+                      onClick={() => setBulkGroupFilter(prev => prev === g.id ? null : g.id)}
+                    >
+                      <span className="inline-block w-1.5 h-1.5 rounded-full mr-1"
+                        style={{ background: bulkGroupFilter === g.id ? '#fff' : groupColor(g.id) }} />
+                      {g.name}
+                      <span className="ml-1 opacity-70">({countInGroup})</span>
+                    </Button>
+                  );
+                })}
+              </div>
+              {bulkGroupFilter && (
+                <div className="mt-2 text-xs text-indigo-500 bg-white rounded-lg px-2 py-1.5 border border-indigo-100">
+                  ✓ Only closings from <strong>{closingGroupMap[bulkGroupFilter]?.name}</strong> are pre-selected.
+                  Members with no closings in this group will be skipped.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Per-member closing selection table */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -597,6 +810,25 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
               </div>
             ) : (
               <div className="border border-gray-200 rounded-xl overflow-hidden">
+
+                {/* ✅ Search bar */}
+                <div className="px-3 py-2 bg-white border-b border-gray-100">
+                  <Input
+                    size="small"
+                    placeholder="Search by name, reg no, phone..."
+                    prefix={<SearchOutlined className="text-gray-400" style={{ fontSize: 13 }} />}
+                    value={memberSearch}
+                    onChange={e => setMemberSearch(e.target.value)}
+                    allowClear
+                    style={{ borderRadius: 8 }}
+                  />
+                  {memberSearch && (
+                    <div className="text-xs text-gray-400 mt-1 px-0.5">
+                      {filteredMemberRows.length} of {selectedRows.length} members
+                    </div>
+                  )}
+                </div>
+
                 {/* Header */}
                 <div className="bg-gray-50 px-3 py-2 border-b grid grid-cols-12 text-xs font-semibold text-gray-400">
                   <div className="col-span-4">Member</div>
@@ -606,88 +838,113 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
                   <div className="col-span-1"></div>
                 </div>
 
-                <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-                  {selectedRows.map((member) => {
-                    const payAmount = member.payAmount || 200;
-                    const pending = memberPendingClosings[member.id] || [];
-                    const selectedIds = memberSelectedClosings[member.id] || [];
-                    const selectedCount = selectedIds.length;
-                    const amountToPay = selectedCount * payAmount;
-                    const hasPending = pending.length > 0;
+                <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                  {filteredMemberRows.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                      <SearchOutlined style={{ fontSize: 22, marginBottom: 6 }} />
+                      <span className="text-xs">No members match "{memberSearch}"</span>
+                    </div>
+                  ) : (
+                    filteredMemberRows.map((member) => {
+                      const payAmount = member.payAmount || 200;
+                      const allPending = memberPendingClosings[member.id] || [];
+                      const filteredPending = bulkGroupFilter
+                        ? allPending.filter(c => c.closingGroupId === bulkGroupFilter)
+                        : allPending;
+                      const selectedIds = memberSelectedClosings[member.id] || [];
+                      const selectedCount = selectedIds.length;
+                      const amountToPay = selectedCount * payAmount;
+                      const hasPending = filteredPending.length > 0;
+                      const hasAnyPending = allPending.length > 0;
+                      const dimmed = bulkGroupFilter && !hasPending;
 
-                    return (
-                      <div key={member.id}
-                        className={`grid grid-cols-12 items-center gap-1 px-3 py-2.5 border-b last:border-0
-                          ${selectedCount > 0 ? 'bg-white' : hasPending ? 'bg-yellow-50' : 'bg-gray-50'}`}>
+                      return (
+                        <div key={member.id}
+                          className={`grid grid-cols-12 items-center gap-1 px-3 py-2.5 border-b last:border-0 transition-all
+                            ${dimmed ? 'opacity-40 bg-gray-50' : selectedCount > 0 ? 'bg-white' : hasPending ? 'bg-yellow-50' : 'bg-gray-50'}`}>
 
-                        {/* Member info */}
-                        <div className="col-span-4 flex items-center gap-2 min-w-0">
-                          {member.photoURL
-                            ? <Avatar src={member.photoURL} size={30} className="flex-shrink-0" />
-                            : <Avatar size={30} className="flex-shrink-0"
-                                style={{ background: `hsl(${(member.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontSize: 11, fontWeight: 700 }}>
-                                {member.displayName?.charAt(0)?.toUpperCase()}
-                              </Avatar>}
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-gray-800 truncate">{member.displayName}</div>
-                            <div className="text-xs text-gray-400 truncate">{member.registrationNumber}</div>
+                          {/* Member info */}
+                          <div className="col-span-4 flex items-center gap-2 min-w-0">
+                            {member.photoURL
+                              ? <Avatar src={member.photoURL} size={30} className="flex-shrink-0" />
+                              : <Avatar size={30} className="flex-shrink-0"
+                                  style={{ background: `hsl(${(member.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontSize: 11, fontWeight: 700 }}>
+                                  {member.displayName?.charAt(0)?.toUpperCase()}
+                                </Avatar>}
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-gray-800 truncate">{member.displayName}</div>
+                              <div className="text-xs text-gray-400 truncate">{member.registrationNumber}</div>
+                              {member.phone && (
+                                <div className="text-xs text-gray-400 truncate">{member.phone}</div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Pending */}
+                          <div className="col-span-2 text-center">
+                            {hasPending
+                              ? <Tag color="orange" className="text-xs m-0">{filteredPending.length}</Tag>
+                              : hasAnyPending && bulkGroupFilter
+                                ? <Tooltip title={`${allPending.length} pending in other groups`}>
+                                    <span className="text-xs text-gray-300">—</span>
+                                  </Tooltip>
+                                : <span className="text-xs text-gray-300">—</span>}
+                          </div>
+
+                          {/* Selected */}
+                          <div className="col-span-3 text-center">
+                            {hasPending ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className={`text-xs font-bold ${selectedCount > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>
+                                  {selectedCount}/{filteredPending.length}
+                                </span>
+                                <div className="flex-1 bg-gray-100 rounded-full h-1 max-w-12">
+                                  <div className="h-1 rounded-full bg-indigo-400 transition-all"
+                                    style={{ width: filteredPending.length > 0 ? `${(selectedCount / filteredPending.length) * 100}%` : '0%' }} />
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-300">{dimmed ? 'No match' : 'No pending'}</span>
+                            )}
+                          </div>
+
+                          {/* Amount */}
+                          <div className="col-span-2 text-right">
+                            <span className={`text-xs font-bold ${amountToPay > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                              {amountToPay > 0 ? fmt(amountToPay) : '—'}
+                            </span>
+                          </div>
+
+                          {/* Edit */}
+                          <div className="col-span-1 flex justify-end">
+                            {hasAnyPending && !dimmed && (
+                              <Button size="small" type="text"
+                                icon={<EditOutlined />}
+                                onClick={() => openClosingSelector(member)}
+                                className="text-indigo-500 hover:text-indigo-700 p-0 h-6 w-6" />
+                            )}
                           </div>
                         </div>
-
-                        {/* Total pending */}
-                        <div className="col-span-2 text-center">
-                          {hasPending
-                            ? <Tag color="orange" className="text-xs m-0">{pending.length}</Tag>
-                            : <span className="text-xs text-gray-300">—</span>}
-                        </div>
-
-                        {/* Selected closings */}
-                        <div className="col-span-3 text-center">
-                          {hasPending ? (
-                            <div className="flex items-center justify-center gap-1">
-                              <span className={`text-xs font-bold ${selectedCount > 0 ? 'text-indigo-600' : 'text-gray-400'}`}>
-                                {selectedCount}/{pending.length}
-                              </span>
-                              {/* Mini progress bar */}
-                              <div className="flex-1 bg-gray-100 rounded-full h-1 max-w-12">
-                                <div className="h-1 rounded-full bg-indigo-400 transition-all"
-                                  style={{ width: pending.length > 0 ? `${(selectedCount / pending.length) * 100}%` : '0%' }} />
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-300">No pending</span>
-                          )}
-                        </div>
-
-                        {/* Amount */}
-                        <div className="col-span-2 text-right">
-                          <span className={`text-xs font-bold ${amountToPay > 0 ? 'text-green-600' : 'text-gray-300'}`}>
-                            {amountToPay > 0 ? fmt(amountToPay) : '—'}
-                          </span>
-                        </div>
-
-                        {/* Edit button */}
-                        <div className="col-span-1 flex justify-end">
-                          {hasPending && (
-                            <Button size="small" type="text"
-                              icon={<EditOutlined />}
-                              onClick={() => openClosingSelector(member)}
-                              className="text-indigo-500 hover:text-indigo-700 p-0 h-6 w-6" />
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Distribution preview (selected ones only) */}
+          {/* Distribution preview */}
           {memberDistribution.length > 0 && (
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-3">
               <div className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-2">
                 <CheckCircleOutlined /> Payment Preview ({memberDistribution.length} members)
+                {bulkGroupFilter && (
+                  <span className="ml-auto inline-flex items-center gap-1 text-xs rounded-full px-2 py-0.5"
+                    style={{ background: `${groupColor(bulkGroupFilter)}18`, color: groupColor(bulkGroupFilter), border: `1px solid ${groupColor(bulkGroupFilter)}40` }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: groupColor(bulkGroupFilter) }} />
+                    {closingGroupMap[bulkGroupFilter]?.name}
+                  </span>
+                )}
               </div>
               <div className="space-y-1.5 max-h-40 overflow-y-auto">
                 {memberDistribution.map((d, i) => (
@@ -757,7 +1014,6 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
         </div>
       </Drawer>
 
-      {/* ✅ Closing Selector Modal */}
       <ClosingSelectorModal
         open={selectorModal.open}
         onClose={() => setSelectorModal({ open: false, member: null })}
@@ -767,660 +1023,12 @@ function BulkPaymentDrawer({ open, onClose, selectedRows, programId, programName
         onConfirm={(selectedIds) => {
           if (selectorModal.member) handleClosingConfirm(selectorModal.member.id, selectedIds);
         }}
+        closingGroupMap={closingGroupMap}
       />
     </>
   );
 }
 
-// ─── ADD SINGLE PAYMENT DRAWER ────────────────────────────────────────────────
-function AddPaymentDrawer({ open, onClose, programId, programName, programList, user, onSuccess }) {
-  const { message } = App.useApp();
-  const [form] = Form.useForm();
-  const [currentStep, setCurrentStep] = useState(0);
-  const [selectedProgram, setSelectedProgram] = useState(null);
-  const [members, setMembers] = useState([]);
-  const [marriages, setMarriages] = useState([]);
-  const [filteredMarriages, setFilteredMarriages] = useState([]);
-  const [selectedMember, setSelectedMember] = useState(null);
-  const [selectedMarriages, setSelectedMarriages] = useState([]);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [loading, setLoading] = useState(false);
-  const [fetchingMembers, setFetchingMembers] = useState(false);
-  const [fetchingMarriages, setFetchingMarriages] = useState(false);
-  const [paymentPendingEntries, setPaymentPendingEntries] = useState([]);
-  const [alreadyPaidMarriages, setAlreadyPaidMarriages] = useState([]);
-  const [checkingReference, setCheckingReference] = useState(false);
-  const [isReferenceValid, setIsReferenceValid] = useState(true);
-  const [marriageSearchText, setMarriageSearchText] = useState('');
-  const [showPendingOnly, setShowPendingOnly] = useState(false);
-  const [waterfallPreview, setWaterfallPreview] = useState(null);
-  const [customTotalAmount, setCustomTotalAmount] = useState(null);
-
-  useEffect(() => {
-    if (!open) {
-      form.resetFields();
-      setCurrentStep(0);
-      setSelectedProgram(null);
-      setMembers([]);
-      setMarriages([]);
-      setFilteredMarriages([]);
-      setSelectedMember(null);
-      setSelectedMarriages([]);
-      setPaymentMethod('cash');
-      setPaymentPendingEntries([]);
-      setAlreadyPaidMarriages([]);
-      setIsReferenceValid(true);
-      setMarriageSearchText('');
-      setShowPendingOnly(false);
-      setWaterfallPreview(null);
-      setCustomTotalAmount(null);
-    }
-  }, [open]);
-
-  const distributeWaterfall = (totalAmount, closingsList, perClosingAmount) => {
-    const sortedClosings = [...closingsList].sort((a, b) => {
-      const dateA = a.closingAt || a.createdAt || '';
-      const dateB = b.closingAt || b.createdAt || '';
-      return dateA.localeCompare(dateB);
-    });
-    const distribution = [];
-    let remainingAmount = totalAmount;
-    for (const closing of sortedClosings) {
-      if (remainingAmount <= 0) break;
-      const amountForThisClosing = Math.min(remainingAmount, perClosingAmount);
-      distribution.push({
-        closingId: closing.id,
-        amount: amountForThisClosing,
-        isFullPayment: amountForThisClosing >= perClosingAmount,
-        closingData: closing,
-        closingName: closing.displayName,
-        closingReg: closing.registrationNumber,
-      });
-      remainingAmount -= amountForThisClosing;
-    }
-    return {
-      distributions: distribution,
-      totalDistributed: totalAmount - remainingAmount,
-      remainingAmount,
-      fullyPaidClosings: distribution.filter(d => d.isFullPayment).length,
-      totalClosingsProcessed: distribution.length,
-    };
-  };
-
-  const perClosingAmountValue = Form.useWatch('amount', form) || 200;
-
-  useEffect(() => {
-    if (selectedMarriages.length > 0 && selectedMember && perClosingAmountValue > 0) {
-      const totalAmount = customTotalAmount || (selectedMarriages.length * perClosingAmountValue);
-      const selectedClosingsData = marriages.filter(m => selectedMarriages.includes(m.id));
-      const preview = distributeWaterfall(totalAmount, selectedClosingsData, perClosingAmountValue);
-      setWaterfallPreview(preview);
-    } else {
-      setWaterfallPreview(null);
-    }
-  }, [selectedMarriages, selectedMember, perClosingAmountValue, customTotalAmount, marriages]);
-
-  const fetchClosings = async (prog) => {
-    setFetchingMarriages(true);
-    try {
-      const data = await getData(
-        `/users/${user.uid}/programs/${prog.id}/members`,
-        [
-          { field: 'active_flag', operator: '==', value: true },
-          { field: 'delete_flag', operator: '==', value: false },
-          { field: 'marriage_flag', operator: '==', value: true },
-          { field: 'status', operator: 'in', value: ['closed', 'accepted'] }
-        ],
-        { field: 'closingAt', direction: 'desc' }
-      );
-      setMarriages(data);
-      setFilteredMarriages(data);
-    } catch (e) { message.error('Failed to fetch closings'); }
-    finally { setFetchingMarriages(false); }
-  };
-
-  const fetchMembers = async (prog) => {
-    setFetchingMembers(true);
-    try {
-      const data = await getData(
-        `/users/${user.uid}/programs/${prog.id}/members`,
-        [
-          { field: 'active_flag', operator: '==', value: true },
-          { field: 'delete_flag', operator: '==', value: false },
-          { field: 'status', operator: '==', value: 'accepted' }
-        ],
-        { field: 'createdAt', direction: 'desc' }
-      );
-      setMembers(data);
-    } catch (e) { message.error('Failed to fetch members'); }
-    finally { setFetchingMembers(false); }
-  };
-
-  const fetchMemberPaymentInfo = async (memberId, prog) => {
-    if (!memberId || !prog || !user) return;
-    try {
-      const pendQ = query(
-        collection(db, `users/${user.uid}/programs/${prog.id}/payment_pending`),
-        where('memberId', '==', memberId),
-        where('delete_flag', '==', false)
-      );
-      const pendSnap = await getDocs(pendQ);
-      setPaymentPendingEntries(pendSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-
-      const paidQ = query(
-        collection(db, `users/${user.uid}/programs/${prog.id}/transactions`),
-        where('payerId', '==', memberId),
-        where('status', '==', 'completed'),
-        where('delete_flag', '==', false)
-      );
-      const paidSnap = await getDocs(paidQ);
-      const paidIds = [...new Set(paidSnap.docs.map(d => {
-        const data = d.data();
-        return data.marriageId || data.closingMemberId;
-      }).filter(Boolean))];
-      setAlreadyPaidMarriages(paidIds);
-    } catch (e) { console.error(e); }
-  };
-
-  const checkDupRef = async (ref) => {
-    if (!ref || !selectedProgram) return false;
-    setCheckingReference(true);
-    try {
-      const isDup = await checkDupRefAPI(selectedProgram.id, ref);
-      setIsReferenceValid(!isDup);
-      return isDup;
-    } finally { setCheckingReference(false); }
-  };
-
-  useEffect(() => {
-    let filtered = [...marriages];
-    if (marriageSearchText) {
-      const s = marriageSearchText.toLowerCase();
-      filtered = filtered.filter(m =>
-        m.displayName?.toLowerCase().includes(s) ||
-        m.fatherName?.toLowerCase().includes(s) ||
-        m.registrationNumber?.toLowerCase().includes(s)
-      );
-    }
-    if (showPendingOnly && selectedMember) {
-      const pendingIds = paymentPendingEntries.map(p => p.closingMemberId || p.marriageId);
-      filtered = filtered.filter(m => pendingIds.includes(m.id));
-    }
-    filtered = filtered.filter(m => !alreadyPaidMarriages.includes(m.id));
-    setFilteredMarriages(filtered);
-  }, [marriageSearchText, showPendingOnly, marriages, paymentPendingEntries, selectedMember, alreadyPaidMarriages]);
-
-  const handleProgramSelect = async (value) => {
-    const prog = programList.find(p => p.id === value);
-    setSelectedProgram(prog);
-    form.setFieldsValue({ program: value });
-    if (prog) await Promise.all([fetchClosings(prog), fetchMembers(prog)]);
-  };
-
-  const handleMemberSelect = async (memberId) => {
-    setSelectedMember(memberId);
-    setSelectedMarriages([]);
-    setWaterfallPreview(null);
-    setCustomTotalAmount(null);
-    const member = members.find(m => m.id === memberId);
-    form.setFieldsValue({ amount: member?.payAmount || 200 });
-    await fetchMemberPaymentInfo(memberId, selectedProgram);
-    setCurrentStep(2);
-  };
-
-  const handleSelectAllPending = () => {
-    const pendingIds = paymentPendingEntries
-      .map(p => p.closingMemberId || p.marriageId)
-      .filter(id => !alreadyPaidMarriages.includes(id));
-    const available = marriages.filter(m => pendingIds.includes(m.id)).map(m => m.id);
-    if (!available.length) { message.info('No pending payments available'); return; }
-    setSelectedMarriages(available);
-    setCustomTotalAmount(null);
-  };
-
-  const totalSelectedAmount = selectedMarriages.length * perClosingAmountValue;
-  const effectiveTotalAmount = customTotalAmount || totalSelectedAmount;
-
-  const processPayment = async (values) => {
-    if (values.paymentMethod === 'online' && !values.onlineReference?.trim()) {
-      message.error('Enter transaction reference');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await processSinglePaymentAPI({
-        programId: selectedProgram.id,
-        programName: selectedProgram.name,
-        payerId: selectedMember,
-        selectedClosingIds: selectedMarriages,
-        paymentMethod: values.paymentMethod,
-        paymentDate: dayjs(values.paymentDate).toISOString(),
-        note: values.note || '',
-        onlineReference: values.onlineReference || '',
-        perClosingAmount: Number(values.amount) || 200,
-        customTotalAmount: customTotalAmount || null,
-      });
-
-      const fullPayments = result.fullyPaid || 0;
-      const partialCount = (result.processed || 0) - fullPayments;
-
-      if (result.remaining > 0) {
-        message.warning(`Payment of ${fmt(effectiveTotalAmount)} processed but ${fmt(result.remaining)} remains unallocated.`);
-      } else {
-        message.success(`Payment of ${fmt(result.totalPaid)} distributed across ${result.processed} closing(s). ${fullPayments} fully paid, ${partialCount} partially paid.`);
-      }
-
-      onSuccess?.();
-      onClose();
-    } catch (err) {
-      if (err.status === 409) {
-        message.error('Duplicate reference number');
-        setIsReferenceValid(false);
-      } else if (err.status === 401) {
-        message.error('Session expired. Please login again.');
-      } else {
-        message.error(err.message || 'Failed to save payments');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const pendingCount = paymentPendingEntries.length;
-  const memberDetails = members.find(m => m.id === selectedMember);
-
-  const steps = [
-    { title: 'Program', icon: <AppstoreOutlined /> },
-    { title: 'Payer', icon: <TeamOutlined /> },
-    { title: 'Closings', icon: <UnorderedListOutlined /> },
-    { title: 'Payment', icon: <DollarOutlined /> },
-  ];
-
-  const canProceed = () => {
-    if (currentStep === 0) return !!selectedProgram;
-    if (currentStep === 1) return !!selectedMember;
-    if (currentStep === 2) return selectedMarriages.length > 0;
-    return true;
-  };
-
-  return (
-    <Drawer
-      open={open} onClose={onClose} width={520} destroyOnClose
-      title={
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center shadow">
-            <DollarOutlined className="text-white text-sm" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold">Record Payment</div>
-            <div className="text-xs text-gray-400">Process marriage payments with waterfall distribution</div>
-          </div>
-        </div>
-      }
-      footer={
-        <div>
-          <Steps current={currentStep} size="small" className="mb-3" items={steps} />
-          <div className="flex gap-2">
-            {currentStep > 0 && (
-              <Button onClick={() => setCurrentStep(s => s - 1)} disabled={loading} size="middle" block>
-                Previous
-              </Button>
-            )}
-            {currentStep < 3
-              ? <Button type="primary" onClick={() => {
-                  if (!canProceed()) { message.warning('Complete this step first'); return; }
-                  setCurrentStep(s => s + 1);
-                }} block size="middle" className="bg-blue-500">Next</Button>
-              : <Button type="primary" loading={loading}
-                  disabled={!selectedMarriages.length || (paymentMethod === 'online' && !isReferenceValid)}
-                  icon={<CheckCircleOutlined />} block size="middle"
-                  className="bg-gradient-to-r from-green-500 to-blue-500 border-0"
-                  onClick={() => form.submit()}>Confirm Payment</Button>}
-          </div>
-        </div>
-      }
-    >
-      <Form form={form} layout="vertical" size="middle"
-        initialValues={{ paymentDate: dayjs(), paymentMethod: 'cash', amount: 200 }}
-        onFinish={processPayment}>
-
-        {currentStep === 0 && (
-          <div className="space-y-4">
-            <div className="text-center mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                <AppstoreOutlined className="text-white text-xl" />
-              </div>
-              <h3 className="text-base font-semibold">Select Program</h3>
-              <p className="text-xs text-gray-500">Choose the program for payment</p>
-            </div>
-            <Form.Item name="program" rules={[{ required: true }]}>
-              <Select placeholder="Select program" size="large" showSearch optionFilterProp="label" onChange={handleProgramSelect}>
-                {programList.map(p => (
-                  <Option key={p.id} value={p.id} label={p.name}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
-                        <AppstoreOutlined className="text-white text-xs" />
-                      </div>
-                      <span className="font-medium">{p.name}</span>
-                    </div>
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </div>
-        )}
-
-        {currentStep === 1 && (
-          <div className="space-y-4">
-            <div className="text-center mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-green-400 to-green-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                <TeamOutlined className="text-white text-xl" />
-              </div>
-              <h3 className="text-base font-semibold">Select Payer</h3>
-              <p className="text-xs text-gray-500">Who is making the payment?</p>
-            </div>
-            <Form.Item name="member" rules={[{ required: true }]}>
-              <Select loading={fetchingMembers} placeholder="Search member..." size="large" showSearch
-                filterOption={(input, option) => (option['data-search'] || '').toLowerCase().includes(input.toLowerCase())}
-                onChange={handleMemberSelect} optionLabelProp="label"
-                notFoundContent={fetchingMembers ? <Spin size="small" /> : 'No members'}>
-                {members.map(m => (
-                  <Option key={m.id} value={m.id} label={m.displayName}
-                    data-search={`${m.displayName} ${m.fatherName} ${m.registrationNumber}`}>
-                    <div className="flex items-center gap-2">
-                      <Avatar size={28} src={m.photoURL}
-                        style={{ background: `hsl(${(m.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontSize: 12, fontWeight: 700 }}>
-                        {m.displayName?.charAt(0)?.toUpperCase()}
-                      </Avatar>
-                      <div>
-                        <div className="font-medium text-sm">{m.displayName}</div>
-                        <div className="text-xs text-gray-400">{m.registrationNumber}</div>
-                      </div>
-                    </div>
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-            {memberDetails && (
-              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-                <div className="flex items-center gap-3">
-                  <Avatar size={40} src={memberDetails.photoURL}
-                    style={{ background: `hsl(${(memberDetails.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontWeight: 700 }}>
-                    {memberDetails.displayName?.charAt(0)?.toUpperCase()}
-                  </Avatar>
-                  <div>
-                    <div className="font-semibold">{memberDetails.displayName}</div>
-                    <div className="text-xs text-gray-400">{memberDetails.registrationNumber}</div>
-                    <div className="flex gap-1 mt-1">
-                      <Tag color="blue" className="text-xs">₹{memberDetails.payAmount || 200}/closing</Tag>
-                      {pendingCount > 0 && <Tag color="orange" className="text-xs">{pendingCount} pending</Tag>}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {currentStep === 2 && (
-          <div className="space-y-3">
-            <div className="text-center mb-3">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-400 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                <UnorderedListOutlined className="text-white text-xl" />
-              </div>
-              <h3 className="text-base font-semibold">Select Closings</h3>
-              <p className="text-xs text-gray-500">Choose closings to pay for (waterfall distribution)</p>
-            </div>
-
-            <Row gutter={8}>
-              {[
-                { label: 'Available', value: filteredMarriages.length, color: '#10b981', bg: '#ecfdf5' },
-                { label: 'Pending', value: pendingCount, color: '#f97316', bg: '#fff7ed' },
-                { label: 'Selected', value: selectedMarriages.length, color: '#3b82f6', bg: '#eff6ff' },
-              ].map(s => (
-                <Col span={8} key={s.label}>
-                  <div className="rounded-xl p-2 text-center" style={{ background: s.bg }}>
-                    <div className="text-lg font-bold" style={{ color: s.color }}>{s.value}</div>
-                    <div className="text-xs text-gray-500">{s.label}</div>
-                  </div>
-                </Col>
-              ))}
-            </Row>
-
-            <div className="flex gap-2">
-              <Search placeholder="Search closing..." value={marriageSearchText}
-                onChange={e => setMarriageSearchText(e.target.value)} allowClear size="small" className="flex-1" />
-              <Button size="small" type={showPendingOnly ? 'primary' : 'default'}
-                icon={<FilterOutlined />} onClick={() => setShowPendingOnly(v => !v)}
-                className={showPendingOnly ? 'bg-orange-500 border-orange-500' : ''} />
-            </div>
-
-            {pendingCount > 0 && (
-              <div className="flex items-center justify-between bg-orange-50 px-3 py-2 rounded-lg border border-orange-100">
-                <span className="text-xs text-orange-600">{pendingCount} pending payments</span>
-                <Button type="link" size="small" onClick={handleSelectAllPending}
-                  className="text-orange-600 p-0 h-auto text-xs font-semibold">Select All Pending</Button>
-              </div>
-            )}
-
-            {selectedMarriages.length > 0 && waterfallPreview && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-blue-700 flex items-center gap-1">
-                    <ThunderboltOutlined className="text-xs" /> Waterfall Preview
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Custom:</span>
-                    <InputNumber
-                      placeholder="Auto" value={customTotalAmount} onChange={setCustomTotalAmount}
-                      size="small" prefix="₹" className="w-28" min={0}
-                      max={selectedMarriages.length * perClosingAmountValue}
-                    />
-                    <Button size="small" type="link" onClick={() => setCustomTotalAmount(null)} className="text-blue-500 p-0 h-auto">Reset</Button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
-                  <div className="bg-white rounded-lg p-2 text-center">
-                    <div className="text-gray-400">Total Amount</div>
-                    <div className="font-bold text-blue-600">{fmt(effectiveTotalAmount)}</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-2 text-center">
-                    <div className="text-gray-400">Will Pay</div>
-                    <div className="font-bold text-green-600">{fmt(waterfallPreview.totalDistributed)}</div>
-                  </div>
-                </div>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {waterfallPreview.distributions.map((dist, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1">
-                      <div className="flex items-center gap-2 truncate flex-1">
-                        <span className="font-mono text-gray-400 w-5">{idx + 1}</span>
-                        <span className="font-medium truncate">{dist.closingName}</span>
-                        {dist.isFullPayment
-                          ? <Tag color="green" className="text-xs m-0 px-1">Full</Tag>
-                          : <Tag color="orange" className="text-xs m-0 px-1">Partial</Tag>}
-                      </div>
-                      <div className="font-mono font-medium">{fmt(dist.amount)} / {fmt(perClosingAmountValue)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50" style={{ maxHeight: 320, overflowY: 'auto' }}>
-              {fetchingMarriages
-                ? <div className="flex justify-center py-8"><Spin /></div>
-                : filteredMarriages.length === 0
-                  ? <Empty description="No closings available" className="py-8" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                  : filteredMarriages.map(m => {
-                      const isPending = paymentPendingEntries.some(p =>
-                        (p.closingMemberId === m.id || p.marriageId === m.id) && p.memberId === selectedMember
-                      );
-                      const isSelected = selectedMarriages.includes(m.id);
-                      const idx = selectedMarriages.indexOf(m.id);
-                      return (
-                        <div key={m.id}
-                          onClick={() => {
-                            if (isSelected) setSelectedMarriages(prev => prev.filter(id => id !== m.id));
-                            else setSelectedMarriages(prev => [...prev, m.id]);
-                            setCustomTotalAmount(null);
-                          }}
-                          className={`flex items-center gap-3 p-3 border-b last:border-0 cursor-pointer transition-colors
-                            ${isSelected ? 'bg-blue-50' : 'bg-white hover:bg-gray-50'}`}>
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors
-                            ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'}`}>
-                            {isSelected && <CheckCircleOutlined className="text-white text-xs" style={{ fontSize: 11 }} />}
-                          </div>
-                          <Avatar size={32} src={m.photoURL}
-                            style={{ background: `hsl(${(m.displayName?.charCodeAt(0) || 0) * 7 % 360},55%,55%)`, fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
-                            {m.displayName?.charAt(0)?.toUpperCase()}
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm truncate">{m.displayName}</span>
-                              {isPending && <Tag color="orange" className="text-xs m-0 flex-shrink-0" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>PENDING</Tag>}
-                            </div>
-                            <div className="text-xs text-gray-400">{m.registrationNumber} · {m.fatherName}</div>
-                          </div>
-                          {isSelected && (
-                            <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                              {idx + 1}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-            </div>
-
-            {selectedMarriages.length > 0 && (
-              <div className="flex items-center justify-between bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
-                <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-blue-700">
-                    {selectedMarriages.length} selected · {fmt(totalSelectedAmount)} total
-                  </span>
-                  {customTotalAmount && customTotalAmount !== totalSelectedAmount && (
-                    <span className="text-xs text-blue-500">Custom: {fmt(customTotalAmount)} (waterfall)</span>
-                  )}
-                </div>
-                <Button type="text" size="small" icon={<CloseOutlined />}
-                  onClick={() => { setSelectedMarriages([]); setCustomTotalAmount(null); }}
-                  className="text-blue-500 text-xs">Clear</Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {currentStep === 3 && (
-          <div className="space-y-4">
-            <div className="text-center mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-orange-400 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                <DollarOutlined className="text-white text-xl" />
-              </div>
-              <h3 className="text-base font-semibold">Payment Details</h3>
-              <p className="text-xs text-gray-500">Confirm payment with waterfall distribution</p>
-            </div>
-
-            {waterfallPreview && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-semibold text-blue-700">Waterfall Distribution</span>
-                  <Tag color={waterfallPreview.remainingAmount === 0 ? 'green' : 'orange'} className="text-xs">
-                    {waterfallPreview.remainingAmount === 0 ? 'Fully Allocated' : `${fmt(waterfallPreview.remainingAmount)} Unallocated`}
-                  </Tag>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center text-xs mb-3">
-                  <div className="bg-white rounded-lg p-2">
-                    <div className="text-gray-400">Total Paid</div>
-                    <div className="font-bold text-green-600">{fmt(waterfallPreview.totalDistributed)}</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-2">
-                    <div className="text-gray-400">Closings</div>
-                    <div className="font-bold text-blue-600">{waterfallPreview.totalClosingsProcessed}</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-2">
-                    <div className="text-gray-400">Fully Paid</div>
-                    <div className="font-bold text-emerald-600">{waterfallPreview.fullyPaidClosings}</div>
-                  </div>
-                </div>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {waterfallPreview.distributions.map((dist, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1">
-                      <div className="flex items-center gap-2 truncate flex-1">
-                        <span className="font-mono text-gray-400 w-5">{idx + 1}</span>
-                        <span className="font-medium truncate">{dist.closingName}</span>
-                      </div>
-                      <div className="font-mono font-medium">{fmt(dist.amount)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item name="amount" label="Per Closing Amount" rules={[{ required: true }]}>
-                  <InputNumber className="w-full" prefix="₹" min={1} size="middle" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="paymentMethod" label="Method" rules={[{ required: true }]}>
-                  <Select onChange={setPaymentMethod} size="middle">
-                    <Option value="cash"><div className="flex items-center gap-2"><WalletOutlined className="text-green-500" /> Cash</div></Option>
-                    <Option value="online"><div className="flex items-center gap-2"><CreditCardOutlined className="text-blue-500" /> Online</div></Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Form.Item name="paymentDate" label="Payment Date" rules={[{ required: true }]}>
-              <DatePicker className="w-full" format="DD/MM/YYYY" size="middle" />
-            </Form.Item>
-
-            {paymentMethod === 'online' && (
-              <Form.Item name="onlineReference" label="Transaction / UTR Reference"
-                rules={[{ required: true }, { min: 3 }]}
-                validateStatus={!isReferenceValid ? 'error' : checkingReference ? 'validating' : ''}
-                help={!isReferenceValid ? 'Reference already exists' : undefined}>
-                <Input placeholder="UTR/Transaction ID" size="middle"
-                  onChange={async e => {
-                    if (e.target.value.length >= 3) await checkDupRef(e.target.value);
-                    else setIsReferenceValid(true);
-                  }}
-                  suffix={checkingReference ? <Spin size="small" /> : !isReferenceValid
-                    ? <WarningOutlined className="text-red-500" /> : <CheckCircleOutlined className="text-green-400" />} />
-              </Form.Item>
-            )}
-
-            <Form.Item name="note" label="Note (Optional)">
-              <TextArea rows={2} placeholder="Add notes..." maxLength={200} showCount size="middle" />
-            </Form.Item>
-
-            <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
-              <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-                <span>Payer</span>
-                <span className="font-medium text-gray-700">{memberDetails?.displayName}</span>
-              </div>
-              <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-                <span>Closings Selected</span>
-                <span className="font-medium text-gray-700">{selectedMarriages.length}</span>
-              </div>
-              <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-                <span>Per Closing</span>
-                <span className="font-medium text-gray-700">{fmt(perClosingAmountValue)}</span>
-              </div>
-              <div className="border-t pt-2 mt-2 flex justify-between">
-                <span className="text-sm font-semibold">Total to Pay</span>
-                <span className="text-base font-black text-green-600">
-                  {fmt(customTotalAmount || (selectedMarriages.length * perClosingAmountValue))}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-      </Form>
-    </Drawer>
-  );
-}
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function PaymentPage() {
@@ -1429,6 +1037,8 @@ export default function PaymentPage() {
   const programList = useSelector(state => state.data.programList);
   const selectedProgram = useSelector(state => state.data.selectedProgram);
   const agentList = useSelector(state => state.data.agentsList) || [];
+  // ✅ Get closing groups from redux
+  const closingGroupList = useSelector(state => state.data.closingGroupList) || [];
 
   const [membersData, setMembersData] = useState([]);
   const [summaryStats, setSummaryStats] = useState({ total: 0, totalAmount: 0, totalPaid: 0, totalPending: 0, membersWithPending: 0 });
@@ -1648,10 +1258,22 @@ export default function PaymentPage() {
               <Search placeholder="Search name, reg no, phone..."
                 value={searchText} onChange={e => setSearchText(e.target.value)}
                 allowClear size="small" className="flex-1" style={{ minWidth: 180 }} />
-              <Select placeholder="All agents" size="small" style={{ minWidth: 150 }}
-                value={agentFilter} onChange={setAgentFilter} allowClear showSearch>
-                {agentOptions.map(a => <Option key={a.id} value={a.id}>{a.name}</Option>)}
-              </Select>
+           <Select
+  placeholder="All agents"
+  size="small"
+  style={{ minWidth: 150 }}
+  value={agentFilter}
+  onChange={setAgentFilter}
+  allowClear
+  showSearch
+  optionFilterProp="children"
+>
+  {agentOptions.map((a) => (
+    <Option key={a.id} value={a.id}>
+      {a.name}
+    </Option>
+  ))}
+</Select>
               <Select placeholder="All status" allowClear size="small" style={{ minWidth: 130 }}
                 value={statusFilter} onChange={setStatusFilter}>
                 <Option value="pending">Pending</Option>
@@ -1728,21 +1350,12 @@ export default function PaymentPage() {
         programId={selectedProgram?.id}
         programName={selectedProgram?.name}
         user={user}
+        closingGroupList={closingGroupList}
         onSuccess={() => {
           fetchData();
           gridRef.current?.api?.deselectAll();
           setSelectedRows([]);
         }}
-      />
-
-      <AddPaymentDrawer
-        open={showAddPayment}
-        onClose={() => setShowAddPayment(false)}
-        programId={selectedProgram?.id}
-        programName={selectedProgram?.name}
-        programList={programList || []}
-        user={user}
-        onSuccess={fetchData}
       />
 
       <MemberClosingsDrawer
@@ -1751,6 +1364,7 @@ export default function PaymentPage() {
         member={closingDrawerMember}
         programId={selectedProgram?.id}
         user={user}
+        closingGroupList={closingGroupList}
       />
     </div>
   );

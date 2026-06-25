@@ -378,3 +378,7 @@ button:focus {
 .ant-input-number-input {
   width: 100% !important;
 }
+
+button{
+  cursor:pointer !important;
+}

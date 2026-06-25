@@ -282,10 +282,8 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
 });
-
-const CertificateComServerSide = ({data,selectedProgram}) => (
-  <Document>
-    <Page size={{ width: '210mm', height: '148mm' }} style={styles.page}>
+const Certificate=({data,selectedProgram})=>{
+  return   <Page size={{ width: '210mm', height: '148mm' }} style={styles.page}>
    
         <View style={styles.outerBorder}>
            <Image src={TrsutData.frameImg}style={{
@@ -303,7 +301,7 @@ const CertificateComServerSide = ({data,selectedProgram}) => (
 
           {/* Watermark */}
           <Image 
-           src={"/Images/logovjss.jpeg"}
+           src={TrsutData.logo}
             style={styles.watermark}
           />
 
@@ -465,7 +463,20 @@ const CertificateComServerSide = ({data,selectedProgram}) => (
         </View> 
       </View>
     </Page>
+}
+const CertificateComServerSide = ({data,selectedProgram}) => {
+    const membersArray = Array.isArray(data) ? data : [data];
+  return(
+  <Document>
+ {membersArray.map((member, index) => (
+        <Certificate 
+          key={member?.id || member?.registrationNumber || index}
+          data={member}
+          selectedProgram={selectedProgram}
+          index={index}
+        />
+      ))}
   </Document>
-);
+);}
 
 export default CertificateComServerSide;
