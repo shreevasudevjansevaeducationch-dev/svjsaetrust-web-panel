@@ -11,7 +11,7 @@ import { useAuth } from '@/lib/AuthProvider';
 import { setgetMemberDataChange } from '@/redux/slices/commonSlice';
 import { getData } from '@/lib/services/firebaseService';
 import dayjs from "dayjs";
-import { getAdvanceBalance, getAdvanceTransactions } from '@/lib/advancePayment';
+import { getAdvanceBalance, getAdvanceTransactions, revertAdvanceCredit } from '@/lib/advancePayment';
 import AddAdvancePayment from '@/components/common/addPayment/AddAdvancePayment';
 
 const { Title, Text } = Typography;
@@ -30,7 +30,7 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
   const { user } = useAuth();
   const dispatch = useDispatch();
   const selectedProgram = useSelector((state) => state.data.selectedProgram);
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
 
   // Fetch member transactions when modal opens
   useEffect(() => {
@@ -208,6 +208,30 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
   const handleAdvanceAdded = async () => {
     await fetchAdvanceData();
     setAdvanceDrawerOpen(false);
+  };
+
+  const handleDeleteAdvanceCredit = async (tx) => {
+    if (!user?.uid || !selectedProgram?.id || !selectedMember?.id) return;
+    modal.confirm({
+      title: 'Revert this advance deposit?',
+      content: (
+        <div>
+          <p>This will subtract <strong>₹{tx.amount?.toLocaleString('en-IN')}</strong> from the wallet balance.</p>
+          <p className="text-xs text-gray-400">The transaction will be marked as deleted.</p>
+        </div>
+      ),
+      okText: 'Revert',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await revertAdvanceCredit(user.uid, selectedProgram.id, selectedMember.id, tx.id, tx.amount);
+          message.success('Advance deposit reverted');
+          await fetchAdvanceData();
+        } catch (e) {
+          message.error(e.message || 'Failed to revert');
+        }
+      },
+    });
   };
 
   // Calculate total amount
@@ -798,6 +822,25 @@ function MemberDetailsView({isModalVisible, handleCloseModal, showDeleteConfirm,
                     width: 150,
                     ellipsis: true,
                     render: (val) => val || "-",
+                  },
+                  {
+                    title: "Action",
+                    key: "action",
+                    width: 70,
+                    render: (_, record) => {
+                      if (record.type !== "credit" || record.delete_flag) return null;
+                      return (
+                        <Tooltip title="Revert this advance deposit">
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteAdvanceCredit(record); }}
+                          />
+                        </Tooltip>
+                      );
+                    },
                   },
                 ]}
                 dataSource={advanceTxns}

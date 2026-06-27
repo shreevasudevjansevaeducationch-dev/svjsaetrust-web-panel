@@ -7,6 +7,7 @@ import {
     query,
     where,
     orderBy,
+    updateDoc,
     addDoc,
     Timestamp,
 } from "firebase/firestore";
@@ -127,5 +128,36 @@ export async function addAdvanceDebit(
         transaction.set(newTxRef, txData);
 
         return { id: newTxRef.id, ...txData };
+    });
+}
+
+export async function revertAdvanceCredit(userId, programId, memberId, txId, amount) {
+    const memberRef = doc(db, memberDocPath(userId, programId, memberId));
+    const txRef = doc(db, `${memberAdvanceColPath(userId, programId, memberId)}/${txId}`);
+
+    return await runTransaction(db, async (transaction) => {
+        const [memberSnap, txSnap] = await Promise.all([
+            transaction.get(memberRef),
+            transaction.get(txRef),
+        ]);
+
+        if (!memberSnap.exists()) throw new Error("Member not found");
+        if (!txSnap.exists()) throw new Error("Transaction not found");
+
+        const txData = txSnap.data();
+        if (txData.type !== "credit") throw new Error("Only credit transactions can be reverted");
+        if (txData.delete_flag === true) throw new Error("Transaction already deleted");
+
+        const currentBalance = memberSnap.data().advanceBalance || 0;
+        const newBalance = Math.max(0, currentBalance - Number(amount));
+
+        transaction.update(memberRef, { advanceBalance: newBalance });
+        transaction.update(txRef, {
+            delete_flag: true,
+            revertedAt: new Date().toISOString(),
+            revertedBy: userId,
+        });
+
+        return { newBalance };
     });
 }
