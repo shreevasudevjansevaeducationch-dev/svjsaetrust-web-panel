@@ -1,27 +1,37 @@
 "use client";
 import React, { useEffect, useState } from 'react';
-import { Table, Modal, Tabs, Button, Tag, Space, Avatar, Image, Popconfirm, message, Input } from 'antd';
-import { UserOutlined, PhoneOutlined, MailOutlined, HomeOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
-import { useSelector } from 'react-redux';
+import { Table, Modal, Tabs, Button, Tag, Space, Avatar, Image, Input, Alert, App, Dropdown } from 'antd';
+import { UserOutlined, PhoneOutlined, MailOutlined, HomeOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined, KeyOutlined, MoreOutlined } from '@ant-design/icons';
+import { useSelector, useDispatch } from 'react-redux';
+import { collection, deleteDoc, doc, getDocs, query, where, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useAuth } from '@/lib/AuthProvider';
 import AgentManagement from './EditAgents';
 import AgentDetails from './agentDetails';
+import { setgetAgentDataChange } from '@/redux/slices/commonSlice';
 import { sendFirebaseNotification } from '@/lib/helper';
 
 const AgentPage = () => {
-  // Mock data - replace with useSelector in your actual implementation
-
 const {agentsList}= useSelector((state) => state.data);
+const programList = useSelector((state) => state.data.programList) || [];
+const { user } = useAuth();
+const { message, modal } = App.useApp();
+  const dispatch = useDispatch();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState(agentsList);
   const [isAgentDrawerVisible, setIsAgentDrawerVisible] = useState(false);
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // Filter agents based on search text
   const handleSearch = (value) => {
     setSearchText(value);
     const filtered = agentsList.filter(agent =>
       agent.displayName.toLowerCase().includes(value.toLowerCase()) ||
+      agent.agentCode?.toLowerCase().includes(value.toLowerCase()) ||
       agent.email.toLowerCase().includes(value.toLowerCase()) ||
       agent.phone.includes(value) ||
       agent.city.toLowerCase().includes(value.toLowerCase()) ||
@@ -43,13 +53,120 @@ const {agentsList}= useSelector((state) => state.data);
   const handleEdit = (record) => {
     setSelectedAgent(record)
     setIsAgentDrawerVisible(true)
-    message.info(`Edit agent: ${record.displayName}`);
-    // Add your edit logic here
   };
 
-  const handleDelete = (record) => {
-    message.success(`Agent ${record.displayName} deleted successfully`);
-    // Add your delete logic here
+  const handleDelete = async (record) => {
+    try {
+      if (!user?.uid) {
+        message.error('User not authenticated');
+        return;
+      }
+      // Check if any members are assigned to this agent across all programs
+      let totalMembers = 0;
+      for (const program of programList) {
+        const membersRef = collection(db, "users", user.uid, "programs", program.id, "members");
+        const q = query(
+          membersRef,
+          where("agentId", "==", record.uid),
+          where("active_flag", "==", true),
+          where("delete_flag", "==", false),
+          where("status", "==", "accepted")
+        );
+        const snap = await getDocs(q);
+        totalMembers += snap.size;
+      }
+
+      const doDeleteAgent = async () => {
+        try {
+          // Delete the agent document from Firestore
+          const agentRef = doc(db, "users", user.uid, "agents", record.uid);
+          await deleteDoc(agentRef);
+          // Also try to delete Firebase Auth user
+          try {
+            await fetch('/api/user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', uid: record.uid }),
+            });
+          } catch (authErr) {
+            console.log('Auth delete error (may not exist):', authErr);
+          }
+          dispatch(setgetAgentDataChange(true));
+          message.success(`Agent ${record.displayName} successfully deleted!`);
+        } catch (err) {
+          console.error('Error deleting agent:', err);
+          message.error('Failed to delete agent.');
+        }
+      };
+
+      if (totalMembers > 0) {
+        modal.confirm({
+          title: 'एजेंट को हटाएं',
+          icon: <Alert type="warning" showIcon={false} />,
+          content: (
+            <div>
+              <p>इस एजेंट को <strong>{totalMembers}</strong> सदस्य असाइन किए गए हैं।</p>
+              <p style={{ color: '#ff4d4f', marginTop: 8, fontWeight: 500 }}>
+                क्या आप वाकई इस एजेंट को हटाना चाहते हैं?
+              </p>
+            </div>
+          ),
+          okText: 'हाँ, हटाएँ',
+          okType: 'danger',
+          cancelText: 'रद्द करें',
+          onOk: doDeleteAgent,
+          onCancel: () => {},
+        });
+      } else {
+        modal.confirm({
+          title: 'एजेंट को हटाएं',
+          content: <p>क्या आप वाकई इस एजेंट को हटाना चाहते हैं?</p>,
+          okText: 'हाँ, हटाएँ',
+          okType: 'danger',
+          cancelText: 'रद्द करें',
+          onOk: doDeleteAgent,
+          onCancel: () => {},
+        });
+      }
+    } catch (error) {
+      console.error('Error in delete:', error);
+      message.error('एजेंट हटाने में विफल।');
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      message.error('कृपया कम से कम 6 अक्षरों का पासवर्ड दर्ज करें');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      const res = await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'updatePassword', uid: selectedAgent?.uid, newPassword }),
+      });
+      const data = await res.json();
+      if (data.success !== false) {
+        // Also update password in Firestore agent doc
+        try {
+          const agentRef = doc(db, 'users', user.uid, 'agents', selectedAgent.uid);
+          await updateDoc(agentRef, { password: newPassword });
+        } catch (firestoreErr) {
+          console.error('Firestore password update error:', firestoreErr);
+        }
+        message.success(`पासवर्ड सफलतापूर्वक बदल दिया गया! नया पासवर्ड: ${newPassword}`, 10);
+        setPasswordModalVisible(false);
+        setNewPassword('');
+      } else {
+        message.error(data.error || 'पासवर्ड बदलने में विफल');
+      }
+    } catch (error) {
+      console.error('Password change error:', error);
+      message.error('पासवर्ड बदलने में विफल');
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   const columns = [
@@ -67,6 +184,12 @@ const {agentsList}= useSelector((state) => state.data);
       dataIndex: 'displayName',
       key: 'displayName',
       sorter: (a, b) => a.displayName.localeCompare(b.displayName),
+    },
+    {
+      title: 'Agent Code',
+      dataIndex: 'agentCode',
+      key: 'agentCode',
+      width: 110,
     },
     {
       title: 'Email',
@@ -109,39 +232,51 @@ const {agentsList}= useSelector((state) => state.data);
       title: 'Actions',
       key: 'actions',
       fixed: 'right',
-      width: 180,
+      width: 110,
       render: (_, record) => (
-        <Space size="small">
-          <Button 
-            type="primary" 
-            icon={<EyeOutlined />} 
-            onClick={() => handleView(record)}
+        <Space size={2}>
+          <Button
+            type="link"
             size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleView(record)}
+            style={{ color: '#3b82f6', padding: '4px 8px', fontSize: 13 }}
           >
             View
           </Button>
-          <Button 
-            icon={<EditOutlined />} 
-            onClick={() => handleEdit(record)}
-            size="small"
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'edit',
+                  icon: <EditOutlined />,
+                  label: 'Edit',
+                  onClick: () => handleEdit(record),
+                },
+                {
+                  key: 'password',
+                  icon: <KeyOutlined />,
+                  label: 'Change Password',
+                  onClick: () => {
+                    setSelectedAgent(record);
+                    setNewPassword('');
+                    setPasswordModalVisible(true);
+                  },
+                },
+                { type: 'divider' },
+                {
+                  key: 'delete',
+                  icon: <DeleteOutlined />,
+                  label: 'Delete',
+                  danger: true,
+                  onClick: () => handleDelete(record),
+                },
+              ],
+            }}
+            trigger={['click']}
           >
-            Edit
-          </Button>
-          {/* <Popconfirm
-            title="Delete Agent"
-            description="Are you sure you want to delete this agent?"
-            onConfirm={() => handleDelete(record)}
-            okText="Yes"
-            cancelText="No"
-          >
-            <Button 
-              danger 
-              icon={<DeleteOutlined />}
-              size="small"
-            >
-              Delete
-            </Button>
-          </Popconfirm> */}
+            <Button type="text" icon={<MoreOutlined />} size="small" />
+          </Dropdown>
         </Space>
       ),
     },
@@ -359,8 +494,37 @@ const onClickSendMsg=async()=>{
         </div>
 
        
-        <AgentManagement isAgentDrawerVisible={isAgentDrawerVisible} setIsAgentDrawerVisible={setIsAgentDrawerVisible} agentData={selectedAgent} mode='edit' onSuccess={()=>{}}/>
+        <AgentManagement isAgentDrawerVisible={isAgentDrawerVisible} setIsAgentDrawerVisible={setIsAgentDrawerVisible} agentData={selectedAgent} mode='edit' onSuccess={() => dispatch(setgetAgentDataChange(true))}/>
           <AgentDetails isViewModalVisible={isModalVisible} setIsViewModalVisible={setIsModalVisible} selectedAgent={selectedAgent} />
+
+        {/* Password Change Modal */}
+        <Modal
+          title="एजेंट का पासवर्ड बदलें"
+          open={passwordModalVisible}
+          onCancel={() => {
+            setPasswordModalVisible(false);
+            setNewPassword('');
+          }}
+          footer={[
+            <Button key="cancel" onClick={() => { setPasswordModalVisible(false); setNewPassword(''); }}>
+              रद्द करें
+            </Button>,
+            <Button key="submit" type="primary" loading={changingPassword} onClick={handlePasswordChange}>
+              पासवर्ड बदलें
+            </Button>,
+          ]}
+        >
+          <div style={{ padding: '20px 0' }}>
+            <p style={{ marginBottom: 12 }}>एजेंट: <strong>{selectedAgent?.displayName}</strong></p>
+            <p style={{ marginBottom: 8 }}>ईमेल: {selectedAgent?.email}</p>
+            <Input.Password
+              placeholder="नया पासवर्ड दर्ज करें (कम से कम 6 अक्षर)"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              style={{ marginTop: 12 }}
+            />
+          </div>
+        </Modal>
       </div>
 
       <style jsx global>{`
