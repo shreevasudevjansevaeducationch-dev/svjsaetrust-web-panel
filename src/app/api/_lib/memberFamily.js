@@ -103,7 +103,7 @@ export async function getMemberClosingList(basePath, programId, memberId, groupM
 
     if (status === 'paid') {
       paidCount++;
-      paidAmount += paid || amount;
+      paidAmount += amount; // always use full payAmount — 'paid' means fully settled
     } else if (status === 'partial') {
       partialCount++;
       paidAmount += paid;
@@ -196,13 +196,24 @@ export async function getMemberFullClosingStatus(basePath, programId, memberId, 
     getMemberClosingList(basePath, programId, memberId, gMap),
     getMemberTransactions(basePath, programId, memberId),
   ]);
+
+  // Use the transactions collection as the single source of truth for how
+  // much has actually been paid. This ensures aggregateSummary.paidAmount
+  // (returned by home + closing-list) matches aggregateTransactionsSummary.totalPaid
+  // (returned by payment-history) — all three APIs now agree.
+  const transactionTotal = transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
   return {
     closings,
-    summary,
+    summary: {
+      ...summary,
+      paidAmount: transactionTotal,
+      totalAmount: summary.pendingAmount + transactionTotal,
+    },
     transactions,
     transactionsSummary: {
       count: transactions.length,
-      totalPaid: transactions.reduce((s, t) => s + (Number(t.amount) || 0), 0),
+      totalPaid: transactionTotal,
     },
   };
 }
