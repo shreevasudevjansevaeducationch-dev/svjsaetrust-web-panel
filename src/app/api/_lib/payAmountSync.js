@@ -11,6 +11,11 @@
 // and which still-unpaid payment_pending docs have to change so that (2) and
 // (3) match (1) again.
 //
+// The join fee works the same way: program.ageGroups[].joinFee is copied to
+// member.joinFees when the member is added/edited. buildPlan() also brings
+// member.joinFees in line, but only for members who have NOT yet paid their
+// join fee in full.
+//
 // Used by: app/api/programs/sync-pay-amount/route.js
 
 import dayjs from 'dayjs';
@@ -98,6 +103,49 @@ export function isOpenPendingEntry(entry) {
   return !(Number(entry.paidAmount) > 0);
 }
 
+const toNumber = (value) => {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = Number(value);
+  return Number.isNaN(num) ? 0 : num;
+};
+
+// The age group's join fee, or null when none is set on the yojna
+// (an empty field must never overwrite members with 0).
+export function groupJoinFee(group) {
+  const raw = group?.joinFee;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const fee = Number(raw);
+  return Number.isFinite(fee) && fee >= 0 ? fee : null;
+}
+
+// Has this member already paid the join fee they were charged, in full?
+// Such members keep their old fee when the yojna's fee changes.
+//   - paid amount covers the current fee, or
+//   - older record: marked done with no paid amount stored (not a part payment)
+export function isJoinFeeFullyPaid(member) {
+  const fee = toNumber(member?.joinFees);
+  const paid = toNumber(member?.joinFeesPaidAmount);
+  if (fee > 0 && paid >= fee) return true;
+  return member?.joinFeesDone === true && paid <= 0 && member?.joinFeesPaymentType !== 'custom';
+}
+
+// What to write on a member whose join fee is still (partly) unpaid, or null
+// when nothing has to change.
+export function joinFeeChange(member, newFee) {
+  if (newFee === null || isJoinFeeFullyPaid(member)) return null;
+  if (toNumber(member?.joinFees) === newFee) return null; // already on this fee (no fee stored counts as 0)
+
+  const paid = toNumber(member?.joinFeesPaidAmount);
+  const change = {
+    from: member?.joinFees ?? null,
+    to: newFee,
+    remaining: Math.max(0, newFee - paid),
+  };
+  // Fee came down to (or below) what was already paid: nothing is due any more.
+  if (paid >= newFee) change.done = true;
+  return change;
+}
+
 /**
  * @param {object}   args
  * @param {object[]} args.ageGroups      program.ageGroups
@@ -106,8 +154,13 @@ export function isOpenPendingEntry(entry) {
  * @param {string[]} [args.onlyRanges]   limit the update to these age-group ranges
  *                                       (e.g. ['18-25']); omit for all groups
  *
- * Each returned update carries `source` (the original object passed in), so the
- * caller can keep its own document references on those objects.
+ * Three kinds of change come out of this:
+ *   memberUpdates   member.payAmount            (not for fixed-amount members)
+ *   joinFeeUpdates  member.joinFees + remaining (not for members who already
+ *                                                paid their join fee in full)
+ *   entryUpdates    payment_pending.payAmount   (only fully unpaid entries)
+ * Each update carries `source` (the original object passed in), so the caller
+ * can keep its own document references on those objects.
  */
 export function buildPlan({ ageGroups, members, pendingEntries, onlyRanges }) {
   const groups = Array.isArray(ageGroups) ? ageGroups : [];
@@ -122,23 +175,31 @@ export function buildPlan({ ageGroups, members, pendingEntries, onlyRanges }) {
       startAge: g.startAge,
       endAge: g.endAge,
       payAmount: Number(g.payAmount) || 0,
-      members: 0,
-      membersToUpdate: 0,
+      joinFee: groupJoinFee(g),
+      members: 0,                // active members in this age group
+      memberDocsToUpdate: 0,     // members that get any change (pay amount and/or join fee)
+      membersToUpdate: 0,        // ... of which: pay amount changes
+      joinFeeMembersToUpdate: 0, // ... of which: join fee changes
+      joinFeePaidLeft: 0,        // join fee differs but member already paid in full -> left alone
       entriesToUpdate: 0,
       oldEntriesTotal: 0,
       newEntriesTotal: 0,
-      fromAmounts: {}, // { '300': 120 } = 120 pending entries currently at 300
+      fromAmounts: {},  // { '300': 120 } = 120 pending entries currently at 300
+      fromJoinFees: {}, // { '100': 40 }  = 40 members currently at join fee 100
     });
   }
 
   const skipped = { fixed: 0, inactive: 0, notMember: 0, unmatched: 0, noAmount: 0 };
   const unmatchedSamples = [];
   const memberUpdates = [];
+  const joinFeeUpdates = [];
   const targetByMember = new Map();
 
   for (const m of members || []) {
     const reason = ineligibleReason(m);
-    if (reason) {
+    // Fixed-amount members keep their own closing amount, but they still pay
+    // the join fee like everyone else, so they are not dropped here.
+    if (reason && reason !== 'fixed') {
       if (reason !== 'deleted') skipped[reason]++;
       continue;
     }
@@ -160,21 +221,42 @@ export function buildPlan({ ageGroups, members, pendingEntries, onlyRanges }) {
 
     const key = rangeKey(match.group);
     const st = stats.get(key);
+    st.members++;
+
+    const inScope = !only || only.has(key);
+    let changed = false;
+
+    // ── pay amount ──
     const target = st.payAmount;
-    if (!(target > 0)) {
+    if (reason === 'fixed') {
+      skipped.fixed++;
+    } else if (!(target > 0)) {
       // Never write 0 / empty amounts onto members.
       skipped.noAmount++;
-      continue;
+    } else if (inScope) {
+      targetByMember.set(m.id, { target, key });
+      if (Number(m.payAmount) !== target) {
+        st.membersToUpdate++;
+        changed = true;
+        memberUpdates.push({ id: m.id, from: m.payAmount ?? null, to: target, key, source: m });
+      }
     }
 
-    st.members++;
-    if (only && !only.has(key)) continue;
-
-    targetByMember.set(m.id, { target, key });
-    if (Number(m.payAmount) !== target) {
-      st.membersToUpdate++;
-      memberUpdates.push({ id: m.id, from: m.payAmount ?? null, to: target, key, source: m });
+    // ── join fee ──
+    if (st.joinFee !== null && inScope) {
+      const change = joinFeeChange(m, st.joinFee);
+      if (change) {
+        st.joinFeeMembersToUpdate++;
+        changed = true;
+        const fromKey = change.from === null || change.from === '' ? 'none' : String(toNumber(change.from));
+        st.fromJoinFees[fromKey] = (st.fromJoinFees[fromKey] || 0) + 1;
+        joinFeeUpdates.push({ id: m.id, ...change, key, source: m });
+      } else if (isJoinFeeFullyPaid(m) && toNumber(m.joinFees) !== st.joinFee) {
+        st.joinFeePaidLeft++;
+      }
     }
+
+    if (changed) st.memberDocsToUpdate++;
   }
 
   const entryUpdates = [];
@@ -208,17 +290,46 @@ export function buildPlan({ ageGroups, members, pendingEntries, onlyRanges }) {
   const groupList = [...stats.values()];
   const totals = groupList.reduce(
     (acc, g) => {
+      acc.memberDocsToUpdate += g.memberDocsToUpdate;
       acc.oldEntriesTotal += g.oldEntriesTotal;
       acc.newEntriesTotal += g.newEntriesTotal;
       return acc;
     },
     {
+      memberDocsToUpdate: 0,
       membersToUpdate: memberUpdates.length,
+      joinFeeMembersToUpdate: joinFeeUpdates.length,
       entriesToUpdate: entryUpdates.length,
       oldEntriesTotal: 0,
       newEntriesTotal: 0,
     }
   );
 
-  return { groups: groupList, totals, skipped, unmatchedSamples, memberUpdates, entryUpdates };
+  return { groups: groupList, totals, skipped, unmatchedSamples, memberUpdates, joinFeeUpdates, entryUpdates };
+}
+
+// One write per member document: pay amount and join fee changes of the same
+// member are merged, so each member doc is written (and checked) only once.
+// Returns [{ id, source, data }].
+export function memberWrites(plan, nowIso) {
+  const byId = new Map();
+  const slot = (u) => {
+    if (!byId.has(u.id)) byId.set(u.id, { id: u.id, source: u.source, data: {} });
+    return byId.get(u.id).data;
+  };
+
+  for (const u of plan.memberUpdates || []) {
+    Object.assign(slot(u), { payAmount: u.to, previousPayAmount: u.from, payAmountUpdatedAt: nowIso });
+  }
+  for (const u of plan.joinFeeUpdates || []) {
+    const data = slot(u);
+    Object.assign(data, {
+      joinFees: u.to,
+      joinFeesRemainingAmount: u.remaining,
+      previousJoinFees: u.from,
+      joinFeesUpdatedAt: nowIso,
+    });
+    if (u.done) data.joinFeesDone = true;
+  }
+  return [...byId.values()];
 }

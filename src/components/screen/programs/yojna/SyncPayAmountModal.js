@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Modal, Table, Alert, Button, Tag, Spin, App } from 'antd';
 import { SyncOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getAuth } from 'firebase/auth';
+import { callYojnaSync as callSyncApi } from '@/lib/yojnaSync';
 
 // "Update existing amounts" for one yojna.
 // Shows what would change first (preview); nothing is written until the
@@ -10,20 +10,7 @@ import { getAuth } from 'firebase/auth';
 
 const fmt = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 
-async function callSyncApi(body) {
-  const token = await getAuth().currentUser?.getIdToken();
-  if (!token) throw new Error('Not authenticated');
-  const res = await fetch('/api/programs/sync-pay-amount', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
-}
-
-const hasChanges = (g) => g.membersToUpdate > 0 || g.entriesToUpdate > 0;
+const hasChanges = (g) => g.memberDocsToUpdate > 0 || g.entriesToUpdate > 0;
 
 const SyncPayAmountModal = ({ program, open, onClose }) => {
   const { message } = App.useApp();
@@ -60,7 +47,7 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
   }, [open, programId, loadPreview]);
 
   const selectedGroups = (preview?.groups || []).filter((g) => selectedKeys.includes(g.key));
-  const membersToUpdate = selectedGroups.reduce((s, g) => s + g.membersToUpdate, 0);
+  const membersToUpdate = selectedGroups.reduce((s, g) => s + g.memberDocsToUpdate, 0);
   const entriesToUpdate = selectedGroups.reduce((s, g) => s + g.entriesToUpdate, 0);
   const nothingToDo = membersToUpdate === 0 && entriesToUpdate === 0;
 
@@ -92,21 +79,38 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
       render: (_, g) => <span className="font-medium">{g.startAge} - {g.endAge} yrs</span>,
     },
     {
-      title: 'Yojna amount',
-      dataIndex: 'payAmount',
+      title: 'Pay amount',
       key: 'payAmount',
-      align: 'right',
-      render: (v) => (v > 0 ? <span className="font-semibold text-green-700">{fmt(v)}</span> : <Tag>Not set</Tag>),
+      render: (_, g) => (
+        <div>
+          {g.payAmount > 0 ? <span className="font-semibold text-green-700">{fmt(g.payAmount)}</span> : <Tag>Not set</Tag>}
+          <div className="text-xs text-gray-400">
+            {g.membersToUpdate} of {g.members} member(s) to update
+          </div>
+        </div>
+      ),
     },
     {
-      title: 'Members',
-      key: 'members',
-      align: 'right',
+      title: 'Join fee',
+      key: 'joinFee',
       render: (_, g) => (
-        <span>
-          <span className="font-semibold">{g.membersToUpdate}</span>
-          <span className="text-gray-400"> of {g.members} to update</span>
-        </span>
+        <div>
+          {g.joinFee === null || g.joinFee === undefined
+            ? <Tag>Not set</Tag>
+            : <span className="font-semibold text-blue-700">{fmt(g.joinFee)}</span>}
+          {g.joinFeeMembersToUpdate > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {Object.entries(g.fromJoinFees || {}).map(([from, count]) => (
+                <Tag key={from} color="blue" className="mb-0">
+                  {from === 'none' ? 'no fee' : fmt(from)} → {fmt(g.joinFee)} × {count}
+                </Tag>
+              ))}
+            </div>
+          )}
+          {g.joinFeePaidLeft > 0 && (
+            <div className="text-xs text-gray-400 mt-1">{g.joinFeePaidLeft} already paid in full, not changed</div>
+          )}
+        </div>
       ),
     },
     {
@@ -144,10 +148,10 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
 
   const skipped = preview?.skipped || {};
   const skippedParts = [
-    skipped.fixed > 0 && `${skipped.fixed} fixed-amount`,
+    skipped.fixed > 0 && `${skipped.fixed} fixed-amount (pay amount only)`,
     skipped.inactive > 0 && `${skipped.inactive} blocked / inactive`,
     skipped.notMember > 0 && `${skipped.notMember} not accepted yet`,
-    skipped.noAmount > 0 && `${skipped.noAmount} in an age group with no amount set`,
+    skipped.noAmount > 0 && `${skipped.noAmount} in an age group with no pay amount set`,
   ].filter(Boolean);
 
   return (
@@ -162,7 +166,7 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
       onCancel={applying ? undefined : onClose}
       maskClosable={!applying}
       closable={!applying}
-      width={900}
+      width={980}
       destroyOnHidden
       footer={[
         <Button key="refresh" icon={<ReloadOutlined />} onClick={loadPreview} disabled={loading || applying}>
@@ -186,8 +190,8 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
         type="info"
         showIcon
         className="mb-4"
-        message="Applies the amount set in this yojna to existing members and their pending closing entries."
-        description="Only entries on which nothing has been paid yet are changed. Paid and partly paid entries, fixed-amount members and blocked members stay as they are."
+        message="Applies the pay amount and join fee set in this yojna to existing members and their pending closing entries."
+        description="Pay amount: only closing entries on which nothing has been paid yet are changed; fixed-amount members keep their own amount. Join fee: only members who have not paid their join fee in full are changed (remaining = new fee - already paid). Blocked members stay as they are."
       />
 
       {error && <Alert type="error" showIcon className="mb-4" message={error} />}
@@ -199,7 +203,7 @@ const SyncPayAmountModal = ({ program, open, onClose }) => {
           columns={columns}
           dataSource={preview?.groups || []}
           pagination={false}
-          scroll={{ x: 760 }}
+          scroll={{ x: 880 }}
           rowSelection={{
             selectedRowKeys: selectedKeys,
             onChange: setSelectedKeys,
