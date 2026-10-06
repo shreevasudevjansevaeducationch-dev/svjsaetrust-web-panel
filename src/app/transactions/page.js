@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSelector } from 'react-redux';
 import { useAuth } from '@/lib/AuthProvider';
 import { deleteData, getData, updateData } from '@/lib/services/firebaseService';
+import { syncFixedMembers } from '@/lib/fixedAmount';
 import { doc, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
@@ -216,6 +217,12 @@ const TransactionsPage = () => {
             }
           });
         } catch { /* non-critical */ }
+      }
+
+      // Fixed-amount member: re-check the fixed total. If the member is no longer
+      // fully paid, the closings that were cleared for them are put back.
+      if (transaction.payerId) {
+        try { await syncFixedMembers(program.id, [transaction.payerId]); } catch { /* non-critical */ }
       }
 
       antdMessage.success('Transaction deleted successfully');

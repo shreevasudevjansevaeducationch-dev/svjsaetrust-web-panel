@@ -42,7 +42,7 @@ export async function GET(request) {
       // Only fetch fields needed for stats — huge payload reduction
       adminDb.collection(`${basePath}/payment_pending`)
         .where('delete_flag', '==', false)
-        .select('memberId', 'status')
+        .select('memberId', 'status', 'payAmount', 'paidAmount')
         .get(),
 
       // Only fetch fields needed for sum
@@ -56,11 +56,21 @@ export async function GET(request) {
     // 3. Pre-group by memberId — O(n) instead of O(n²) filter inside loop
     const pendingByMember = {};
     for (const doc of pendingSnap.docs) {
-      const { memberId, status } = doc.data();
+      const { memberId, status, payAmount: entryAmount, paidAmount: entryPaid } = doc.data();
       if (!pendingByMember[memberId]) {
-        pendingByMember[memberId] = { total: 0, pending: 0, paid: 0 };
+        pendingByMember[memberId] = { total: 0, pending: 0, paid: 0, amount: 0, noAmount: 0, overpaid: 0 };
       }
       pendingByMember[memberId].total++;
+      // Each closing entry keeps the amount it was created (or last updated) with.
+      // Entries with no stored amount fall back to the member's amount below.
+      if (Number(entryAmount) > 0) {
+        pendingByMember[memberId].amount += Number(entryAmount);
+        // Paid at a higher rate than the entry carries (member's amount was raised
+        // before the entry was updated): the extra belongs to this entry only.
+        pendingByMember[memberId].overpaid += Math.max(0, Number(entryPaid || 0) - Number(entryAmount));
+      } else {
+        pendingByMember[memberId].noAmount++;
+      }
       if (status === 'pending') pendingByMember[memberId].pending++;
       if (status === 'paid')    pendingByMember[memberId].paid++;
     }
@@ -77,9 +87,14 @@ export async function GET(request) {
     const enriched = membersSnap.docs.map((d) => {
       const member = { id: d.id, ...d.data() };
       const payAmount  = member.payAmount || 200;
-      const stats      = pendingByMember[member.id] || { total: 0, pending: 0, paid: 0 };
+      const stats      = pendingByMember[member.id] || { total: 0, pending: 0, paid: 0, amount: 0, noAmount: 0, overpaid: 0 };
       const totalPaid  = paidAmtByMember[member.id] || 0;
-      const totalAmt   = stats.total * payAmount;
+      // Sum of the entries' own amounts, not count x today's member amount:
+      // after a rate change old paid closings must still count at the old rate.
+      // (A fixed-amount member's one large payment is meant to cover all entries,
+      // so the per-entry 'overpaid' correction is not applied to them.)
+      const totalAmt   = stats.amount + stats.noAmount * payAmount
+        + (member.isFixedAmountMember === true ? 0 : stats.overpaid);
       const totalPend  = Math.max(0, totalAmt - totalPaid);
       const paidPct    = totalAmt > 0 ? Math.round((totalPaid / totalAmt) * 100) : 0;
 

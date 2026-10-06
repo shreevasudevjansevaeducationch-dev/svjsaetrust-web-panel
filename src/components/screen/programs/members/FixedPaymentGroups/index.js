@@ -6,7 +6,7 @@ import {
 import {
   WalletOutlined, PlusOutlined, DeleteOutlined, TeamOutlined,
   UserOutlined, CloseOutlined, EditOutlined, DollarOutlined,
-  SearchOutlined, PhoneOutlined, IdcardOutlined, CheckCircleOutlined,
+  SearchOutlined, PhoneOutlined, IdcardOutlined, CheckCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
@@ -16,6 +16,7 @@ import {
   query, where, getDoc, arrayUnion, arrayRemove, writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { syncFixedMembers } from '@/lib/fixedAmount';
 
 const { Option } = Select;
 
@@ -46,6 +47,43 @@ const FixedPaymentGroups = ({ open, onClose }) => {
   const membersRef = () =>
     collection(db, `users/${user.uid}/programs/${selectedProgram.id}/members`);
 
+  // Paid / remaining of each fixed member, keyed by member id (from the server).
+  const [fixedStatusMap, setFixedStatusMap] = useState({});
+  const [checkingFixed, setCheckingFixed] = useState(false);
+
+  // Asks the server to add up what each member has paid. A member who has paid
+  // the full fixed amount gets their leftover pending closings cleared; a member
+  // who is no longer fixed / no longer fully paid gets them back.
+  // Never throws: the group change itself is already saved when this runs.
+  const refreshFixedStatus = async (memberIds, { silent = false } = {}) => {
+    const ids = [...new Set((memberIds || []).filter(Boolean))];
+    if (!ids.length || !selectedProgram) return;
+    setCheckingFixed(true);
+    try {
+      const results = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        results.push(...await syncFixedMembers(selectedProgram.id, ids.slice(i, i + 200)));
+      }
+      setFixedStatusMap((prev) => {
+        const next = { ...prev };
+        results.forEach((r) => { next[r.memberId] = r; });
+        return next;
+      });
+      const cleared = results.filter((r) => r.archived > 0);
+      const fullyPaid = results.filter((r) => r.completed);
+      if (cleared.length) {
+        message.success(`${cleared.length} member(s) have paid the full fixed amount - their pending closings were cleared`);
+      } else if (!silent) {
+        message.info(`Checked ${results.length} member(s): ${fullyPaid.length} fully paid`);
+      }
+    } catch (e) {
+      console.error(e);
+      if (!silent) message.error('Could not check fixed-amount payments');
+    } finally {
+      setCheckingFixed(false);
+    }
+  };
+
   const fetchData = async () => {
     if (!user || !selectedProgram) return;
     setLoading(true);
@@ -71,6 +109,12 @@ const FixedPaymentGroups = ({ open, onClose }) => {
   useEffect(() => {
     if (open) fetchData();
   }, [open, user, selectedProgram]);
+
+  useEffect(() => {
+    if (open && selectedGroup?.members?.length) {
+      refreshFixedStatus(selectedGroup.members.map((m) => m.memberId), { silent: true });
+    }
+  }, [open, selectedGroup?.id]);
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) { message.error('Enter a group name'); return; }
@@ -126,6 +170,7 @@ const FixedPaymentGroups = ({ open, onClose }) => {
           }
 
           await batch.commit();
+          await refreshFixedStatus(memberList.map((m) => m.memberId), { silent: true });
           setGroups((prev) => prev.filter((g) => g.id !== groupId));
           if (selectedGroup?.id === groupId) setSelectedGroup(null);
           message.success(`Group deleted${memberList.length ? ` and ${memberList.length} member(s) reset` : ''}`);
@@ -186,6 +231,8 @@ const FixedPaymentGroups = ({ open, onClose }) => {
       }
 
       await batch.commit();
+      // A member may already have paid the full fixed amount before joining the group.
+      await refreshFixedStatus(newEntries.map((e) => e.memberId), { silent: true });
 
       const updatedGroup = {
         ...selectedGroup,
@@ -229,6 +276,7 @@ const FixedPaymentGroups = ({ open, onClose }) => {
       });
 
       await batch.commit();
+      await refreshFixedStatus([memberId], { silent: true });
 
       const updatedGroup = {
         ...selectedGroup,
@@ -363,6 +411,16 @@ const FixedPaymentGroups = ({ open, onClose }) => {
                   {selectedGroup.members?.length || 0} member(s)
                 </span>
                 <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={checkingFixed}
+                  disabled={!(selectedGroup.members || []).length}
+                  onClick={() => refreshFixedStatus((selectedGroup.members || []).map((m) => m.memberId))}
+                  style={{ marginLeft: 'auto', marginRight: 8 }}
+                >
+                  Check payments
+                </Button>
+                <Button
                   type="primary"
                   size="small"
                   icon={<PlusOutlined />}
@@ -378,6 +436,7 @@ const FixedPaymentGroups = ({ open, onClose }) => {
               ) : (
                 (selectedGroup.members || []).map((member) => {
                   const full = allMembers.find((m) => m.id === member.memberId);
+                  const fx = fixedStatusMap[member.memberId];
                   return (
                     <div
                       key={member.memberId}
@@ -402,7 +461,15 @@ const FixedPaymentGroups = ({ open, onClose }) => {
                         </div>
                       </Space>
                       <Space size={4}>
-                        <Tag color="purple" style={{ margin: 0 }}>₹{Number(selectedGroup.fixedAmount).toLocaleString('en-IN')}</Tag>
+                        {fx?.isFixed && fx.completed ? (
+                          <Tag color="green" icon={<CheckCircleOutlined />} style={{ margin: 0 }}>Paid in full</Tag>
+                        ) : fx?.isFixed ? (
+                          <Tag color="purple" style={{ margin: 0 }}>
+                            ₹{fx.paid.toLocaleString('en-IN')} / ₹{fx.fixedAmount.toLocaleString('en-IN')}
+                          </Tag>
+                        ) : (
+                          <Tag color="purple" style={{ margin: 0 }}>₹{Number(selectedGroup.fixedAmount).toLocaleString('en-IN')}</Tag>
+                        )}
                         <Popconfirm
                           title="Remove from this group?"
                           onConfirm={() => handleRemoveMember(member.memberId)}

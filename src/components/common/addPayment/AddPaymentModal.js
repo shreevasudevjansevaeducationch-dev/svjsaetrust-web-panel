@@ -9,6 +9,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { getData, createData } from '@/lib/services/firebaseService';
 import { getAdvanceBalance, addAdvanceDebit } from '@/lib/advancePayment';
+import { syncFixedMembers } from '@/lib/fixedAmount';
 import { useAuth } from '@/lib/AuthProvider';
 import { updateDoc, doc, getDocs, query, where, collection, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -119,6 +120,10 @@ const AddPaymentModal = () => {
   const [useAdvanceWallet, setUseAdvanceWallet]           = useState(false);
   const [memberAdvanceBalance, setMemberAdvanceBalance]   = useState(0);
 
+  /* ── Fixed-amount member: { fixedAmount, paid, remaining, completed }, null for normal members ── */
+  const [fixedInfo, setFixedInfo]                         = useState(null);
+  const [fixedPayAmount, setFixedPayAmount]               = useState(0);
+
   /* ── Status tab + Closing Group filter ── */
   const [activeStatusTab, setActiveStatusTab]           = useState('pending');
   const [selectedClosingGroup, setSelectedClosingGroup] = useState(null);
@@ -220,6 +225,15 @@ const AddPaymentModal = () => {
     if (!selectedMarriages.length)   { message.error('Please select at least one marriage'); return; }
     if (!selectedMember)             { message.error('Please select a paying member'); return; }
 
+    if (fixedInfo) {
+      const amt = Number(values.amount);
+      if (fixedInfo.completed) { message.warning('This member has already paid the full fixed amount'); return; }
+      if (!(amt > 0) || amt > fixedInfo.remaining) {
+        message.error(`Amount must be between ₹1 and ₹${fixedInfo.remaining.toLocaleString('en-IN')} (remaining fixed amount)`);
+        return;
+      }
+    }
+
     if (values.paymentMethod === 'online') {
       if (!values.onlineReference?.trim()) { message.error('Please enter transaction reference/UTR number'); return; }
       const isDuplicate = await checkDuplicateReference(values.onlineReference, selectedProgram.id);
@@ -268,6 +282,9 @@ const AddPaymentModal = () => {
   /* ── Process payment ── */
   const processPayment = async (marriageIds, values) => {
     const amount = Number(values.amount);
+    // Fixed-amount member: ONE payment of the entered amount towards the fixed
+    // total, recorded against the selected closing. Never amount x closings.
+    if (fixedInfo) marriageIds = marriageIds.slice(0, 1);
     setLoading(true);
     try {
       const transactions = [];
@@ -280,7 +297,7 @@ const AddPaymentModal = () => {
         const member      = members.find((m) => m.id === selectedMember);
         const txNumber    = `TRX-${timestamp}-${batchId}-${(i + 1).toString().padStart(3, '0')}`;
 
-        const txAmount = member?.isFixedAmountMember ? (member.fixedAmount || 15200) : (member.payAmount || amount);
+        const txAmount = fixedInfo ? amount : (member.payAmount || amount);
         const txData = {
           amount: txAmount,
           paymentMethod: values.paymentMethod,
@@ -335,6 +352,7 @@ const AddPaymentModal = () => {
         closingAmountPaid: increment(totalPaid),
         closingPaidCount: increment(transactions.length),
       });
+      if (fixedInfo) await settleFixedAfterPayment();
 
       setPaymentSummary({ count: transactions.length, amount, method: values.paymentMethod, reference: values.onlineReference });
       message.success({ content: <div><div className="font-medium">Payment Successful!</div><div className="text-xs">Processed {transactions.length} payment(s) of ₹{amount}</div></div>, duration: 3 });
@@ -350,6 +368,7 @@ const AddPaymentModal = () => {
   /* ── Process advance wallet payment ── */
   const processAdvancePayment = async (marriageIds, values) => {
     const perMarriageAmount = Number(values.amount);
+    if (fixedInfo) marriageIds = marriageIds.slice(0, 1); // one payment towards the fixed total
     const totalAmount       = perMarriageAmount * marriageIds.length;
     setLoading(true);
     try {
@@ -363,7 +382,7 @@ const AddPaymentModal = () => {
         const member     = members.find((m) => m.id === selectedMember);
         const txNumber   = `TRX-${timestamp}-${batchId}-${(i + 1).toString().padStart(3, '0')}`;
 
-        const txAmount   = member?.isFixedAmountMember ? (member?.fixedAmount || 15200) : (member?.payAmount || perMarriageAmount);
+        const txAmount   = fixedInfo ? perMarriageAmount : (member?.payAmount || perMarriageAmount);
 
         const txData = {
           amount: txAmount,
@@ -429,6 +448,7 @@ const AddPaymentModal = () => {
         closingAmountPaid: increment(totalPaid),
         closingPaidCount: increment(transactions.length),
       });
+      if (fixedInfo) await settleFixedAfterPayment();
 
       setPaymentSummary({ count: transactions.length, amount: totalAmount, method: 'advance', reference: '' });
       message.success({ content: <div><div className="font-medium">Payment Successful!</div><div className="text-xs">Processed {transactions.length} payment(s) of ₹{totalAmount} from wallet</div></div>, duration: 3 });
@@ -542,6 +562,38 @@ const AddPaymentModal = () => {
     setFilteredMarriages(filtered);
   }, [marriageSearchText, activeStatusTab, marriages, paymentPendingEntries, selectedMember, alreadyPaidMarriages, selectedClosingGroup]);
 
+  /* ── Fixed-amount member: how much of the fixed total is paid so far ──
+     The server adds up every closing payment of the member. If the total is
+     already reached it also clears the member's leftover pending closings. */
+  const loadFixedInfo = async (member) => {
+    if (!member?.isFixedAmountMember || !(Number(member.fixedAmount) > 0)) return null;
+    try {
+      const [r] = await syncFixedMembers(selectedProgram.id, [member.id]);
+      if (r?.found) {
+        return r.isFixed
+          ? { fixedAmount: r.fixedAmount, paid: r.paid, remaining: r.remaining, completed: r.completed }
+          : null;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    // Server not reachable: fall back to the running total kept on the member.
+    const fixedAmount = Number(member.fixedAmount);
+    const paid = Number(member.closingAmountPaid) || 0;
+    return { fixedAmount, paid, remaining: Math.max(0, fixedAmount - paid), completed: paid >= fixedAmount };
+  };
+
+  const settleFixedAfterPayment = async () => {
+    try {
+      const [r] = await syncFixedMembers(selectedProgram.id, [selectedMember]);
+      if (r?.completed) {
+        message.success(`Fixed amount fully paid. ${r.archived} pending closing(s) cleared.`, 4);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   /* ── Handlers ── */
   const handleMemberSelect = async (memberId) => {
     setSelectedMember(memberId);
@@ -549,7 +601,12 @@ const AddPaymentModal = () => {
     setMarriageSearchText('');
     setUseAdvanceWallet(false);
     const member = members.find((m) => m.id === memberId);
-    const defaultAmount = member?.isFixedAmountMember ? (member?.fixedAmount || 15200) : (member?.payAmount || 200);
+    // Fixed-amount member: ask for what is still left of the fixed total,
+    // not the whole fixed amount again.
+    const fixed = await loadFixedInfo(member);
+    setFixedInfo(fixed);
+    setFixedPayAmount(fixed ? fixed.remaining : 0);
+    const defaultAmount = fixed ? fixed.remaining : (member?.payAmount || 200);
     form.setFieldsValue({ amount: defaultAmount });
     const { alreadyPaidIds } = await fetchMemberPaymentInfo(memberId);
     if (alreadyPaidIds.length > 0) message.info(`${alreadyPaidIds.length} marriage(s) already paid`, 2);
@@ -567,10 +624,12 @@ const AddPaymentModal = () => {
     const amount = Number(value) || 0;
     const count  = selectedMarriages.length || 1;
     setTotalAmount(amount * count);
+    setFixedPayAmount(amount);
   };
 
   /* ── FIX: Select All Pending respects active filters ── */
   const handleSelectAllPending = () => {
+    if (fixedInfo) { message.info('Fixed-amount member: select one closing to record the payment against'); return; }
     const pendingIds = paymentPendingEntries
       .filter((e) => e.memberId === selectedMember)
       .map((e) => e.closingMemberId)
@@ -609,6 +668,8 @@ const AddPaymentModal = () => {
     setSelectedClosingGroup(null);
     setUseAdvanceWallet(false);
     setMemberAdvanceBalance(0);
+    setFixedInfo(null);
+    setFixedPayAmount(0);
   };
 
   const handleReferenceChange = async (e) => {
@@ -621,6 +682,7 @@ const AddPaymentModal = () => {
   const handleNextStep = () => {
     if (currentStep === 0 && !selectedProgram)          { message.warning('Please select a program'); return; }
     if (currentStep === 1 && !selectedMember)           { message.warning('Please select a member'); return; }
+    if (currentStep === 1 && fixedInfo?.completed)      { message.warning('This member has fully paid the fixed amount. No payment is due.'); return; }
     if (currentStep === 2 && !selectedMarriages.length) { message.warning('Please select at least one marriage'); return; }
     setCurrentStep((s) => s + 1);
   };
@@ -635,14 +697,29 @@ const AddPaymentModal = () => {
       pendingSelected:    pendingSel,
       newPayments:        totalSel - pendingSel,
       perAmount,
-      totalAmount:        perAmount * totalSel,
+      totalAmount:        fixedInfo ? (Number(fixedPayAmount) || 0) : perAmount * totalSel,
       availableMarriages: filteredMarriages.length,
       pendingCount:       paymentPendingEntries.filter((p) => p.memberId === selectedMember).length,
       paidCount:          alreadyPaidMarriages.length,
     };
-  }, [selectedMarriages, paymentPendingEntries, selectedMember, alreadyPaidMarriages, filteredMarriages]);
+  }, [selectedMarriages, paymentPendingEntries, selectedMember, alreadyPaidMarriages, filteredMarriages, fixedInfo, fixedPayAmount]);
 
   const memberDetails = members.find((m) => m.id === selectedMember) || null;
+
+  /* ── Fixed-amount member banner (steps 1 and 2) ── */
+  const renderFixedBanner = (hint) => fixedInfo && (
+    <div style={{
+      background: fixedInfo.completed ? '#ecfdf5' : '#f5f3ff',
+      border: `1px solid ${fixedInfo.completed ? '#a7f3d0' : '#ddd6fe'}`,
+      color: fixedInfo.completed ? '#065f46' : '#5b21b6',
+      borderRadius: 10, padding: '10px 12px', marginBottom: 12, fontSize: 12, lineHeight: 1.5,
+    }}>
+      <strong>Fixed-amount member</strong>
+      {' · '}Paid ₹{fixedInfo.paid.toLocaleString('en-IN')} of ₹{fixedInfo.fixedAmount.toLocaleString('en-IN')}
+      {' · '}Remaining ₹{fixedInfo.remaining.toLocaleString('en-IN')}
+      <div>{fixedInfo.completed ? 'Fully paid. No further payment is due for this member.' : hint}</div>
+    </div>
+  );
 
   /* ─────────────────────────────────────────────
      STEP 0 — Program Selection
@@ -768,6 +845,8 @@ const AddPaymentModal = () => {
           </Select>
         </Form.Item>
 
+        {renderFixedBanner('The amount below is what is still left of the fixed total.')}
+
         {memberDetails && (
           <div className="pmMemberCard">
             <div className="pmMemberAvatarLg">
@@ -779,7 +858,9 @@ const AddPaymentModal = () => {
               <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                 <span className="pmStatPill pmStatPillBlue">
                   <DollarOutlined style={{ fontSize: 10 }} />
-                  ₹{memberDetails.payAmount || 200} / marriage
+                  {fixedInfo
+                    ? `Fixed ₹${fixedInfo.fixedAmount.toLocaleString('en-IN')} total`
+                    : `₹${memberDetails.payAmount || 200} / marriage`}
                 </span>
                 {stats.pendingCount > 0 && (
                   <span className="pmStatPill pmStatPillOrange">
@@ -818,7 +899,7 @@ const AddPaymentModal = () => {
           <div className="pmStepHeaderTitle">Select Closings</div>
           <div className="pmStepHeaderSub">
             {selectedMarriages.length > 0
-              ? `${selectedMarriages.length} selected · ₹${(form.getFieldValue('amount') || 0) * selectedMarriages.length} total`
+              ? `${selectedMarriages.length} selected · ₹${stats.totalAmount} total`
               : 'Tap to select closings for payment'}
           </div>
         </div>
@@ -828,6 +909,8 @@ const AddPaymentModal = () => {
       </div>
 
       <div className="pmStepBody">
+
+        {renderFixedBanner('Select one closing to record this payment against.')}
 
         {/* ── Status Tabs ── */}
         <div className="pmTabRow">
@@ -965,7 +1048,9 @@ const AddPaymentModal = () => {
                   onClick={() => {
                     if (isPaid) return;
                     setSelectedMarriages((prev) =>
-                      isSelected ? prev.filter((id) => id !== marriage.id) : [...prev, marriage.id]
+                      isSelected
+                        ? prev.filter((id) => id !== marriage.id)
+                        : fixedInfo ? [marriage.id] : [...prev, marriage.id]
                     );
                   }}
                 >
@@ -1027,7 +1112,7 @@ const AddPaymentModal = () => {
               <span className="pmSelLabel">selected</span>
             </div>
             <div className="pmSelDivider" />
-            <span className="pmSelTotal">₹{(form.getFieldValue('amount') || 0) * selectedMarriages.length}</span>
+            <span className="pmSelTotal">₹{stats.totalAmount}</span>
             <button className="pmClearBtn" onClick={() => setSelectedMarriages([])}>
               <CloseOutlined style={{ fontSize: 10 }} /> Clear
             </button>
@@ -1056,7 +1141,9 @@ const AddPaymentModal = () => {
           <div className="pmAmountLabel">Total Payable</div>
           <div className="pmAmountValue">₹{stats.totalAmount.toLocaleString('en-IN')}</div>
           <div className="pmAmountSub">
-            {stats.totalSelected} closing{stats.totalSelected !== 1 ? 's' : ''} × ₹{stats.perAmount}
+            {fixedInfo
+              ? `Towards fixed amount · ₹${fixedInfo.remaining.toLocaleString('en-IN')} remaining`
+              : `${stats.totalSelected} closing${stats.totalSelected !== 1 ? 's' : ''} × ₹${stats.perAmount}`}
           </div>
         </div>
 
@@ -1064,10 +1151,15 @@ const AddPaymentModal = () => {
           <Col span={12}>
             <Form.Item
               name="amount"
-              label={<span className="pmLabel">Per Marriage (₹)</span>}
+              label={<span className="pmLabel">{fixedInfo ? 'Amount to pay (₹)' : 'Per Marriage (₹)'}</span>}
               rules={[
                 { required: true, message: 'Enter amount' },
                 { validator: (_, v) => Number(v) > 0 ? Promise.resolve() : Promise.reject('Must be > 0') },
+                {
+                  validator: (_, v) => (!fixedInfo || Number(v) <= fixedInfo.remaining)
+                    ? Promise.resolve()
+                    : Promise.reject(`Cannot be more than ₹${fixedInfo.remaining} (remaining fixed amount)`),
+                },
               ]}
             >
               <Input

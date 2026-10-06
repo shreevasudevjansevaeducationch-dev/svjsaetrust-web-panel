@@ -1,6 +1,7 @@
 // app/api/payments/process/route.js
 import { NextResponse } from 'next/server';
 import admin from '../../admin';
+import { syncFixedMember } from '../../_lib/fixedAmount';
 
 const adminDb = admin.firestore();
 const adminAuth = admin.auth();
@@ -87,6 +88,20 @@ async function batchGetDocs(basePath, col, ids) {
     if (s.exists) map[s.id] = { id: s.id, ...s.data() };
   }
   return map;
+}
+
+// Fixed-amount members: once their fixed total is fully paid, their leftover
+// pending closings are cleared (see _lib/fixedAmount.js). The payment itself is
+// already saved at this point, so a failure here must not fail the request.
+async function settleFixedMembers(basePath, members) {
+  const fixed = members.filter((m) => m?.isFixedAmountMember === true);
+  for (const m of fixed) {
+    try {
+      await syncFixedMember(basePath, m.id);
+    } catch (err) {
+      console.error('[payments/process] fixed-amount settle failed for', m.id, err.message);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -243,6 +258,8 @@ async function processSinglePayment(uid, body) {
       closingPaidCount:  admin.firestore.FieldValue.increment(distributions.length),
     });
   }
+
+  await settleFixedMembers(basePath, [member]);
 
   return NextResponse.json({
     success:   true,
@@ -519,6 +536,8 @@ async function processBulkPayment(uid, body) {
     });
   });
   if (memberStatUpdates.length > 0) await Promise.all(memberStatUpdates);
+
+  await settleFixedMembers(basePath, memberPayments.map((mp) => mp.member));
 
   const remaining = isCustomMode
     ? 0 // custom mode mein koi remaining nahi

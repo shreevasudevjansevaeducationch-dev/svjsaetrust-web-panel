@@ -14,12 +14,14 @@ import {
   InfoCircleOutlined,
   UserOutlined,
   StarOutlined,
-  StarFilled
+  StarFilled,
+  SyncOutlined
 } from '@ant-design/icons';
 import { useSelector, useDispatch } from 'react-redux';
 import AddProgramEdit from '@/components/common/program/AddProgramEdit';
 import { deleteProgram, updateProgram } from '@/lib/services/firebaseService';
 import AddProgram from '@/components/common/program';
+import SyncPayAmountModal from './SyncPayAmountModal';
 
 const { Panel } = Collapse;
 const { Meta } = Card;
@@ -34,6 +36,7 @@ const Programs = () => {
   const [filteredData, setFilteredData] = useState(programsList);
   const [editDrawerVisible, setEditDrawerVisible] = useState(false);
   const [programToEdit, setProgramToEdit] = useState(null);
+  const [syncProgram, setSyncProgram] = useState(null);
 
   useEffect(()=>{
     setFilteredData(programsList)
@@ -436,6 +439,14 @@ const Programs = () => {
                     )}
            
                   </div>
+
+                  <Button
+                    block
+                    icon={<SyncOutlined />}
+                    onClick={() => setSyncProgram(program)}
+                  >
+                    Update existing amounts
+                  </Button>
                 </div>
               </Card>
             </Col>
@@ -506,6 +517,13 @@ const Programs = () => {
             setEditDrawerVisible(false);
             setProgramToEdit(null);
           }}
+        />
+
+        {/* Apply the yojna's current amounts to existing members + pending entries */}
+        <SyncPayAmountModal
+          program={syncProgram}
+          open={!!syncProgram}
+          onClose={() => setSyncProgram(null)}
         />
       </div>
     </div>
